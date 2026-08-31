@@ -1,0 +1,22 @@
+# --- Core ---
+pandas>=2.1
+numpy>=1.26
+scipy>=1.11
+python-dateutil>=2.8
+
+# --- Data acquisition ---
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0
+html5lib>=1.1
+python-dotenv>=1.0
+PyYAML>=6.0
+
+# --- Modeling ---
+scikit-learn>=1.4
+statsmodels>=0.14
+
+# --- App ---
+streamlit>=1.33
+plotly>=5.20
+altair>=5.2

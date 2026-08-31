@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "predictiescor",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "streamlit", "run", "src/predictiescor/app/main.py"],
+      "port": 8501
+    }
+  ]
+}

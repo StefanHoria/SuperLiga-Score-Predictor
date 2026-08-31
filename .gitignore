@@ -1,0 +1,41 @@
+# --- Secrete: NICIODATA in repo ---------------------------------
+.env
+.env.local
+.streamlit/secrets.toml
+
+# --- Date locale ------------------------------------------------
+# Baza contine date colectate de pe site-uri terte; ramane locala.
+*.db
+*.sqlite3
+data/predictiescor.db
+data/raw/*
+data/cache/*
+data/models/*
+!data/raw/.gitkeep
+!data/cache/.gitkeep
+!data/models/.gitkeep
+
+# --- Jurnale si fisiere de lucru --------------------------------
+*.log
+data/*.log
+*.pkl
+sweep.json
+odds_sample.json
+
+# --- Python -----------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+build/
+dist/
+
+# --- Unelte locale ----------------------------------------------
+.claude/settings.local.json
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

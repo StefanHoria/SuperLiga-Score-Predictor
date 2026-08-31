@@ -1,0 +1,85 @@
+# ============================================================
+#  PredictieScor - configuratie aplicatie
+# ============================================================
+
+league:
+  name: "SuperLiga"
+  country: "Romania"
+  # ID-uri externe per provider (verifica-le cu: python scripts/verify_sources.py)
+  apifootball_id: 283          # API-Football: Liga I / SuperLiga (verificat)
+  # Planul gratuit API-Football da acces DOAR la aceste sezoane.
+  # Daca faci upgrade, largeste intervalul.
+  apifootball_min_season: 2022
+  apifootball_max_season: 2024
+  # Cate cereri API-Football pot fi consumate intr-o rulare (limita zilnica = 100)
+  apifootball_daily_budget: 90
+  sofascore_tournament_id: 152 # Sofascore: unique-tournament id
+  fbref_comp_id: 47            # FBref: /en/comps/47/Liga-I-Stats
+  fbref_comp_slug: "Liga-I"
+  footballdata_country: "Romania"
+  # LPF.ro numeroteaza paginile de statistici secvential, 8 meciuri pe etapa.
+  # Prima pagina a sezonului curent - verific-o daca schimbi sezonul.
+  lpf_first_match_id: 3592
+  lpf_matches_per_round: 8
+  # Sezoane de descarcat (anul de start: 2023 = sezonul 2023/24)
+  seasons: [2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
+  current_season: 2026
+  # SuperLiga are play-off/play-out: punctele se injumatatesc dupa sezonul regulat
+  has_playoff: true
+
+paths:
+  db: "data/predictiescor.db"
+  raw: "data/raw"
+  cache: "data/cache"
+  models: "data/models"
+
+model:
+  dixon_coles:
+    # Timp de injumatatire (zile) pentru ponderarea meciurilor vechi.
+    # 180 = un meci de acum 6 luni conteaza pe jumatate fata de unul de ieri.
+    half_life_days: 240
+    # Numarul maxim de goluri modelat in matricea de scor
+    max_goals: 10
+    # Regularizare L2 pe parametrii de atac/aparare (evita overfit pe echipe noi)
+    l2_penalty: 0.02
+    # Minim de meciuri pentru ca o echipa sa fie estimata individual
+    min_matches: 6
+    # "Meciuri fictive" la media ligii. Nou-promovatele cu putine meciuri sunt
+    # trase spre medie, ca sa nu ajunga artificial in varful clasamentului.
+    shrinkage_matches: 20
+
+  # Cat cantareste Elo in amestecul cu Dixon-Coles (0 = doar Dixon-Coles).
+  # Masurat prin backtest: 0.4 da cel mai bun log loss si cea mai buna
+  # acuratete, dar curba e plata intre 0.3 si 0.6 - diferentele de acolo sunt
+  # in zgomot la ~600 de meciuri testate.
+  elo_ensemble_weight: 0.4
+
+  elo:
+    k_factor: 20
+    home_advantage: 65
+    initial_rating: 1500
+    # Amplifica update-ul dupa victorii la scor
+    goal_diff_scaling: true
+
+  secondary_stats:
+    # Statistici secundare modelate (cornere, cartonase, suturi etc.)
+    half_life_days: 300
+    shrinkage: 8.0   # nr. de "meciuri fictive" la media ligii (shrinkage bayesian)
+
+  players:
+    min_minutes: 270      # minim de minute ca un jucator sa fie modelat individual
+    half_life_days: 240
+    shrinkage_per90: 4.0  # nr. de "90-uri fictive" la media pozitiei
+
+markets:
+  over_under_lines: [0.5, 1.5, 2.5, 3.5, 4.5]
+  corners_lines: [7.5, 8.5, 9.5, 10.5, 11.5]
+  cards_lines: [2.5, 3.5, 4.5, 5.5]
+  asian_handicaps: [-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0]
+  correct_score_top_n: 15
+
+backtest:
+  # Meciurile de dinainte de aceasta data se folosesc doar la antrenare
+  min_train_matches: 120
+  # Recalibreaza modelul la fiecare N meciuri in walk-forward
+  refit_every: 10
