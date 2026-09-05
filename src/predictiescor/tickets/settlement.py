@@ -11,7 +11,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterable
 
 import pandas as pd
 
@@ -332,6 +332,31 @@ def legs_frame(db, ticket_id: int) -> pd.DataFrame:
     """
     with db.connect() as conn:
         return pd.read_sql_query(sql, conn, params=[ticket_id])
+
+
+def legs_for_tickets(db, ticket_ids: Iterable[int]) -> pd.DataFrame:
+    """Ponturile mai multor bilete deodata.
+
+    Pagina de istoric afisa cate un bilet, ales dintr-un `selectbox`, si cerea
+    o interogare pentru fiecare. Ca sa le poata arata pe toate sub forma de
+    carduri, ii trebuie totul dintr-o data.
+    """
+    ids = [int(i) for i in ticket_ids]
+    if not ids:
+        return pd.DataFrame()
+    marks = ",".join("?" * len(ids))
+    sql = f"""
+        SELECT l.*, ht.name AS home_team, at.name AS away_team, m.utc_date,
+               m.home_goals, m.away_goals
+        FROM ticket_legs l
+        JOIN matches m ON m.match_id = l.match_id
+        JOIN teams ht ON ht.team_id = m.home_team_id
+        JOIN teams at ON at.team_id = m.away_team_id
+        WHERE l.ticket_id IN ({marks})
+        ORDER BY l.ticket_id, m.utc_date
+    """
+    with db.connect() as conn:
+        return pd.read_sql_query(sql, conn, params=ids)
 
 
 def all_legs_frame(db, *, settled_only: bool = True) -> pd.DataFrame:

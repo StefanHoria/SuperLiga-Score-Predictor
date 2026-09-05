@@ -9,7 +9,7 @@ from .learning import (
     overall_summary, strategy_calibration, strategy_performance, update_strategy_weights,
 )
 from .settlement import (
-    legs_frame, settle_tickets, tickets_frame,
+    legs_for_tickets, legs_frame, settle_tickets, tickets_frame,
 )
 from .watcher import (
     due_matches, next_check_at, run_cycle,

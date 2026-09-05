@@ -15,7 +15,7 @@ from common import (  # noqa: F401
 from predictiescor.storage.db import Database
 from predictiescor.tickets import (
     STRATEGIES, TicketGenerator, accuracy_report, learn_calibration,
-    legs_frame, load_calibration, matches_in_range, matches_on,
+    legs_for_tickets, legs_frame, load_calibration, matches_in_range, matches_on,
     next_match_days, overall_summary, recent_match_days, settle_tickets,
     strategy_calibration, strategy_performance, surprising_legs,
     surprising_results,
@@ -275,50 +275,111 @@ with tab_history:
 
     st.divider()
     all_tickets = tickets_frame(db, limit=300)
-    if not all_tickets.empty:
-        status_filter = st.multiselect(
+    if all_tickets.empty:
+        st.caption("Niciun bilet în istoric.")
+    else:
+        ICONS = {"castigat": "✅", "pierdut": "❌", "anulat": "➖",
+                 "deschis": "⏳"}
+        CULORI = {"castigat": "#1a7f37", "pierdut": "#8b2c2c",
+                  "deschis": "#8a6d1f", "anulat": "#4a4a4a"}
+
+        f1, f2, f3 = st.columns([2, 2, 1])
+        stari = f1.multiselect(
             "Stare", sorted(all_tickets["status"].unique()),
-            default=sorted(all_tickets["status"].unique()))
-        shown = all_tickets[all_tickets["status"].isin(status_filter)]
+            default=sorted(all_tickets["status"].unique()),
+            format_func=lambda v: f"{ICONS.get(v, '')} {v}")
+        zile = sorted(all_tickets["match_day"].unique(), reverse=True)
+        ziua_aleasa = f2.selectbox("Ziua", ["toate"] + zile)
+        cate = f3.number_input("Câte bilete", 5, 60, 12, step=5)
 
-        display = shown[["ticket_id", "match_day", "label", "total_odds",
-                         "probability", "stake", "status", "legs_won",
-                         "legs_total", "payout", "profit"]].rename(columns={
-            "ticket_id": "id", "match_day": "ziua", "label": "bilet",
-            "total_odds": "cotă", "probability": "șansă", "stake": "miză",
-            "status": "stare", "legs_won": "ponturi ieșite",
-            "legs_total": "ponturi", "payout": "încasat"})
-        st.dataframe(display, hide_index=True, width="stretch", height=380,
-                     column_config={
-                         "șansă": st.column_config.ProgressColumn(
-                             format="percent", min_value=0.0, max_value=1.0),
-                         "cotă": st.column_config.NumberColumn(format="%.2f"),
-                         "profit": st.column_config.NumberColumn(format="%.2f"),
-                     })
+        shown = all_tickets[all_tickets["status"].isin(stari)]
+        if ziua_aleasa != "toate":
+            shown = shown[shown["match_day"] == ziua_aleasa]
+        shown = shown.head(int(cate))
 
-        chosen_id = st.selectbox("Vezi detaliile biletului",
-                                 shown["ticket_id"].tolist())
-        if chosen_id:
-            legs = legs_frame(db, int(chosen_id))
-            legs["meci"] = legs["home_team"] + " — " + legs["away_team"]
-            legs["scor"] = legs.apply(
-                lambda r: (f"{int(r.home_goals)}-{int(r.away_goals)}"
-                           if pd.notna(r.home_goals) else "—"), axis=1)
-            icons = {"castigat": "✅", "pierdut": "❌", "anulat": "➖",
-                     "deschis": "⏳"}
-            legs["✓"] = legs["result"].map(icons).fillna("⏳")
+        if shown.empty:
+            st.info("Niciun bilet cu filtrele alese.")
+        else:
+            # toate ponturile dintr-o singura interogare, nu una per bilet
+            toate_ponturile = legs_for_tickets(db, shown["ticket_id"].tolist())
+            pe_bilet = dict(tuple(toate_ponturile.groupby("ticket_id")))                 if not toate_ponturile.empty else {}
+
+            st.caption(f"**{len(shown)}** bilete. Fiecare card arată tot: "
+                       f"ponturile, scorurile și unde s-a rupt.")
+
+            for grupa_zi, bilete_zi in shown.groupby("match_day", sort=False):
+                castigate = int((bilete_zi["status"] == "castigat").sum())
+                decise = int((bilete_zi["status"] != "deschis").sum())
+                profit_zi = float(bilete_zi["profit"].fillna(0).sum())
+                st.markdown(
+                    f"#### {grupa_zi} · {castigate}/{decise} câștigate · "
+                    f"{profit_zi:+.0f} lei")
+
+                for rand in bilete_zi.itertuples():
+                    stare = str(rand.status)
+                    culoare = CULORI.get(stare, "#4a4a4a")
+                    ponturi = pe_bilet.get(rand.ticket_id)
+
+                    with st.container(border=True):
+                        # Titlul pe rândul lui: în coloane, etichetele lungi
+                        # („Bilet cu cotă mare") se rupeau pe două rânduri.
+                        profit = (0.0 if pd.isna(rand.profit)
+                                  else float(rand.profit))
+                        bani = (f"<b style='color:{culoare}'>{profit:+.2f} "
+                                f"lei</b>" if stare != "deschis"
+                                else f"miză {rand.stake:.0f} lei")
+                        st.markdown(
+                            f"<div style='display:flex;align-items:center;"
+                            f"gap:10px;flex-wrap:wrap'>"
+                            f"<span style='background:{culoare};color:#fff;"
+                            f"padding:2px 10px;border-radius:10px;"
+                            f"font-size:.85em;white-space:nowrap'>"
+                            f"{ICONS.get(stare, '')} {stare}</span>"
+                            f"<b style='font-size:1.05em'>{rand.label}</b>"
+                            f"<span style='margin-left:auto;opacity:.8;"
+                            f"white-space:nowrap'>cotă <b>"
+                            f"{rand.total_odds:.2f}</b> &nbsp;·&nbsp; șansă <b>"
+                            f"{rand.probability:.0%}</b> &nbsp;·&nbsp; {bani}"
+                            f"</span></div>",
+                            unsafe_allow_html=True)
+
+                        iesite = int(rand.legs_won or 0)
+                        total = int(rand.legs_total or 0)
+                        if total:
+                            st.progress(iesite / total,
+                                        text=f"{iesite} din {total} ponturi ieșite")
+
+                        if ponturi is not None and not ponturi.empty:
+                            for pont in ponturi.itertuples():
+                                scor = ("—" if pd.isna(pont.home_goals)
+                                        else f"{int(pont.home_goals)}-"
+                                             f"{int(pont.away_goals)}")
+                                semn = ICONS.get(str(pont.result), "⏳")
+                                meci = f"{pont.home_team} — {pont.away_team}"
+                                detaliu = (f" · *{pont.actual_value}*"
+                                           if pont.actual_value else "")
+                                st.markdown(
+                                    f"{semn} &nbsp;{pont.description}"
+                                    f" &nbsp;·&nbsp; <span style='opacity:.65'>"
+                                    f"{meci} &nbsp;{scor}{detaliu}</span>",
+                                    unsafe_allow_html=True)
+
+        with st.expander("Vezi ca tabel"):
             st.dataframe(
-                legs[["✓", "meci", "scor", "market", "description",
-                      "probability", "fair_odds", "result", "actual_value"]]
-                .rename(columns={
-                    "market": "piață", "description": "pontul",
-                    "probability": "șansă", "fair_odds": "cotă",
-                    "result": "rezultat", "actual_value": "ce s-a întâmplat"}),
-                hide_index=True, width="stretch",
+                shown[["ticket_id", "match_day", "label", "total_odds",
+                       "probability", "stake", "status", "legs_won",
+                       "legs_total", "payout", "profit"]].rename(columns={
+                    "ticket_id": "id", "match_day": "ziua", "label": "bilet",
+                    "total_odds": "cotă", "probability": "șansă",
+                    "stake": "miză", "status": "stare",
+                    "legs_won": "ponturi ieșite", "legs_total": "ponturi",
+                    "payout": "încasat"}),
+                hide_index=True, width="stretch", height=380,
                 column_config={
                     "șansă": st.column_config.ProgressColumn(
                         format="percent", min_value=0.0, max_value=1.0),
-                    "cotă": st.column_config.NumberColumn(format="%.2f")})
+                    "cotă": st.column_config.NumberColumn(format="%.2f"),
+                    "profit": st.column_config.NumberColumn(format="%.2f")})
 
 # ======================================================================
 # 3. Acuratete si invatare

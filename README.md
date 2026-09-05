@@ -465,6 +465,20 @@ biletul primește un semn. Nu schimbă predicția — spune doar că **modelul
 lucrează cu informație mai veche decât casele**. E singurul semnal din
 aplicație care vine din ceva ce modelul nu are.
 
+### Cum se citește verificarea
+
+Fiecare bilet e un card, nu un rând într-un tabel din care trebuie să-l alegi.
+Se vede dintr-o privire: eticheta de stare colorată, cota, șansa, profitul, o
+bară cu *câte ponturi au ieșit* și, dedesubt, **fiecare pont cu semnul lui**,
+meciul, scorul și ce s-a întâmplat de fapt („3 goluri", „0 cartonașe", „nu avem
+date pe jucători pentru acest meci").
+
+Biletele sunt grupate pe zi, cu bilanțul zilei în titlu. Tabelul clasic a rămas,
+dar strâns într-un panou — nu mai e singura cale de a vedea ceva.
+
+Toate ponturile se aduc **într-o singură interogare** (`legs_for_tickets`), nu
+una per bilet.
+
 ### Istoric onest
 
 ```bash
