@@ -26,6 +26,8 @@ from typing import Any, Callable, Iterable
 
 import pandas as pd
 
+from ..utils.localtime import local_time
+
 log = logging.getLogger(__name__)
 
 
@@ -112,7 +114,7 @@ class Ticket:
         return pd.DataFrame([
             {
                 "meci": leg.match_label,
-                "ora": leg.kickoff[11:16] if len(leg.kickoff) > 15 else "",
+                "ora": local_time(leg.kickoff, "%H:%M"),
                 "piață": leg.market,
                 "pontul": leg.description,
                 "șansă": leg.probability,

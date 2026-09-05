@@ -4,7 +4,6 @@ from __future__ import annotations
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 # Paginile Streamlit sunt rulate ca scripturi independente, deci ne asiguram
 # ca pachetul `predictiescor` e importabil indiferent de unde se porneste.
@@ -22,10 +21,6 @@ from predictiescor.storage.db import Database  # noqa: E402
 PAGE_ICON = "⚽"
 APP_TITLE = "PredictieScor - SuperLiga"
 
-#: Baza tine totul in UTC, ca sa nu depinda de masina pe care ruleaza. Dar
-#: utilizatorul e in Romania: un meci care incepe la 20:30 nu are de ce sa
-#: apara ca 17:30. Conversia se face DOAR la afisare.
-LOCAL_TZ = ZoneInfo("Europe/Bucharest")
 
 
 def setup_page(title: str, icon: str = PAGE_ICON) -> None:
@@ -223,36 +218,9 @@ def season_label(season: int) -> str:
 # ----------------------------------------------------------------------
 # Ora locala
 # ----------------------------------------------------------------------
-def to_local(value) -> datetime | None:
-    """Un moment din baza (UTC) in ora Romaniei. `None` daca nu se poate citi.
-
-    Accepta text ISO, `datetime` sau `pd.Timestamp`. Valorile fara fus orar
-    sunt considerate UTC, fiindca asa le scrie baza.
-    """
-    if value is None or value == "":
-        return None
-    moment = pd.to_datetime(value, utc=True, errors="coerce")
-    if moment is pd.NaT or pd.isna(moment):
-        return None
-    return moment.to_pydatetime().astimezone(LOCAL_TZ)
-
-
-def local_time(value, fmt: str = "%d.%m.%Y %H:%M") -> str:
-    """Momentul, scris in ora Romaniei. Sir gol daca lipseste."""
-    moment = to_local(value)
-    return moment.strftime(fmt) if moment else ""
-
-
-def local_series(values, fmt: str = "%d.%m.%Y %H:%M") -> pd.Series:
-    """Aceeasi conversie, pentru o coloana intreaga."""
-    moments = pd.to_datetime(pd.Series(list(values)), utc=True, errors="coerce")
-    return moments.dt.tz_convert(LOCAL_TZ).dt.strftime(fmt).fillna("")
-
-
-def now_local() -> datetime:
-    return datetime.now(timezone.utc).astimezone(LOCAL_TZ)
-
-
-def tz_note() -> str:
-    """Cum se numeste acum fusul, ca sa scrie pe ecran ce ora e afisata."""
-    return now_local().strftime("%Z") or "ora României"
+# Implementarea sta in `utils/localtime.py`, ca sa o poata folosi si modulele
+# de dedesubt - generatorul de bilete si scripturile din linia de comanda
+# afisau UTC fiindca de aici nu aveau cum sa importe.
+from predictiescor.utils.localtime import (  # noqa: E402,F401
+    LOCAL_TZ, local_series, local_time, now_local, to_local, tz_note,
+)

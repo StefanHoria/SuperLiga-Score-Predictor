@@ -426,3 +426,47 @@ def test_appearances_after_the_cutoff_are_excluded(tmp_path):
 
     assert len(before) == 1
     assert float(before["goals"].sum()) == 1.0, "cele 3 goluri de pe 25 august nu au ce cauta aici"
+
+
+# ----------------------------------------------------------------------
+# Ora din tabelul biletului
+#
+# `to_frame` taia ora direct din sirul ISO (`kickoff[11:16]`), deci arata UTC.
+# Conversia exista, dar statea in `app/common.py` - stratul de aplicatie - unde
+# generatorul n-avea cum s-o importe. Petrolul - Corvinul aparea 12:00 in loc
+# de 15:00, iar Otelul - Rapid 17:30 in loc de 20:30.
+# ----------------------------------------------------------------------
+def _leg_at(kickoff, home="Otelul Galati", away="Rapid Bucuresti"):
+    from predictiescor.tickets.generator import Leg
+    return Leg(match_id=1, home_team=home, away_team=away, kickoff=kickoff,
+               market="1X2", selection="gazda", description="gazda câștigă",
+               probability=0.4, offered_odds=3.0)
+
+
+def _ticket(legs):
+    from predictiescor.tickets.generator import Ticket
+    return Ticket(strategy="goluri", label="Test", match_day="2026-09-06",
+                  legs=legs, stake=10.0)
+
+
+def test_the_ticket_table_shows_romanian_time():
+    frame = _ticket([_leg_at("2026-09-06T17:30:00+00:00")]).to_frame()
+    assert list(frame["ora"]) == ["20:30"], "17:30 UTC înseamnă 20:30 la noi"
+
+
+def test_summer_and_winter_differ_in_the_ticket_table():
+    vara = _ticket([_leg_at("2026-07-15T12:00:00+00:00")]).to_frame()
+    iarna = _ticket([_leg_at("2026-12-15T12:00:00+00:00")]).to_frame()
+    assert list(vara["ora"]) == ["15:00"]      # EEST, UTC+3
+    assert list(iarna["ora"]) == ["14:00"]     # EET, UTC+2
+
+
+def test_a_missing_kickoff_leaves_the_hour_empty():
+    assert list(_ticket([_leg_at("")]).to_frame()["ora"]) == [""]
+
+
+def test_the_hour_is_never_the_raw_utc_slice():
+    """Daca cineva revine la `kickoff[11:16]`, testul asta cade."""
+    kickoff = "2026-09-06T17:30:00+00:00"
+    frame = _ticket([_leg_at(kickoff)]).to_frame()
+    assert frame["ora"].iloc[0] != kickoff[11:16]

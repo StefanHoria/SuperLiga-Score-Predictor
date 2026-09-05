@@ -38,6 +38,9 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from predictiescor.storage.db import Database  # noqa: E402
+from predictiescor.utils.localtime import (  # noqa: E402
+    local_time, tz_note,
+)
 from predictiescor.tickets.watcher import (  # noqa: E402
     next_check_at, run_cycle, status,
 )
@@ -90,7 +93,8 @@ def parse_args() -> argparse.Namespace:
 def show_status(db: Database) -> None:
     info = status(db)
     print(f"Bilete deschise      : {info['bilete_deschise']}")
-    print(f"Ultima verificare    : {info['ultima_verificare'] or 'niciodată'}")
+    print(f"Ultima verificare    : "
+          f"{local_time(info['ultima_verificare']) or 'niciodată'}")
 
     due = info["de_verificat"]
     if due:
@@ -98,7 +102,8 @@ def show_status(db: Database) -> None:
         for match in due:
             mark = "rezultat lipsă" if not match["has_result"] else \
                 f"{match['open_legs']} ponturi deschise"
-            print(f"  {match['kickoff'][:16]}  {match['label']:42s} {mark}")
+            when = local_time(match["kickoff"], "%d.%m %H:%M")
+            print(f"  {when}  {match['label']:42s} {mark}")
     else:
         print("\nNimic de verificat acum.")
 
@@ -106,8 +111,8 @@ def show_status(db: Database) -> None:
     if upcoming:
         delta = upcoming - datetime.now(timezone.utc)
         hours = delta.total_seconds() / 3600
-        print(f"\nUrmătoarea verificare utilă: {upcoming:%d.%m.%Y %H:%M} UTC"
-              f"  (peste {hours:.1f} ore)")
+        print(f"\nUrmătoarea verificare utilă: {local_time(upcoming)} "
+              f"({tz_note()})  (peste {hours:.1f} ore)")
     else:
         print("\nNu sunt meciuri programate în așteptare.")
 
@@ -169,7 +174,7 @@ def main() -> int:
 
     if args.once:
         result = run_cycle(db, force=args.force)
-        stamp = result.checked_at.strftime("%H:%M:%S")
+        stamp = local_time(result.checked_at, "%H:%M:%S")
         if result.did_work:
             logging.getLogger("watch").warning(result.describe())
         print(f"[{stamp}] {result.describe()}")
@@ -184,7 +189,7 @@ def main() -> int:
     try:
         while True:
             result = run_cycle(db, force=args.force)
-            stamp = result.checked_at.strftime("%H:%M:%S")
+            stamp = local_time(result.checked_at, "%H:%M:%S")
             if result.did_work or result.due:
                 print(f"[{stamp}] {result.describe()}")
                 if result.message:

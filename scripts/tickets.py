@@ -28,7 +28,8 @@ if hasattr(sys.stdout, "reconfigure"):
 import pandas as pd  # noqa: E402
 
 from predictiescor.modeling.pipeline import PredictionPipeline  # noqa: E402
-from predictiescor.storage.db import Database  # noqa: E402
+from predictiescor.storage.db import Database
+from predictiescor.utils.localtime import local_time  # noqa: E402
 from predictiescor.tickets import (  # noqa: E402
     TicketGenerator, accuracy_report, learn_calibration, load_calibration,
     matches_on, next_match_days, overall_summary, recent_match_days,
@@ -63,7 +64,7 @@ def parse_args() -> argparse.Namespace:
 def print_ticket(index: int, ticket) -> None:
     print(f"\n  ┌─ Bilet {index}: {ticket.label}")
     for leg in ticket.legs:
-        hour = leg.kickoff[11:16] if len(leg.kickoff) > 15 else "  :  "
+        hour = local_time(leg.kickoff, "%H:%M") or "  :  "
         print(f"  │  {hour}  {leg.match_label}")
         print(f"  │         {leg.description:<46} "
               f"{leg.probability:>6.1%}   cotă {leg.odds:.2f}")
@@ -80,7 +81,7 @@ def generate(db, pipeline, day: str, count: int, stake: float) -> int:
 
     print(f"\n=== Bilete pentru {day} ({len(matches)} meciuri) ===")
     for row in matches.itertuples():
-        hour = str(row.utc_date)[11:16]
+        hour = local_time(row.utc_date, "%H:%M")
         print(f"  {hour}  {row.home_team} — {row.away_team}")
 
     generator = TicketGenerator(pipeline, db, calibrator=load_calibration(db),
