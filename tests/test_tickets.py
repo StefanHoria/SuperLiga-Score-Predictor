@@ -370,3 +370,59 @@ def test_nothing_scheduled_gives_no_day(tmp_path):
                     home="FCSB", away="UTA Arad", home_goals=1, away_goals=1,
                     status="finished")
     assert _pick_day(db, "2026-09-05T15:00:00+00:00")[0] is None
+
+
+# ----------------------------------------------------------------------
+# Backfill fara scurgeri din viitor
+#
+# `player_season_stats` sunt totaluri cumulate PE ZI DE AZI, fara coloana de
+# data. Folosindu-le intr-un backfill pentru 8 august, modelul de marcatori era
+# antrenat pe golurile marcate DUPA acea zi - exact meciurile pe care paria.
+# ----------------------------------------------------------------------
+def test_season_aggregates_cannot_be_cut_off(tmp_path):
+    """Motivul pentru care nu se pot folosi: n-au data."""
+    from predictiescor.storage.db import Database
+    df = Database(tmp_path / "sezon.db").player_season_stats_df()
+    assert "date" not in df.columns
+
+
+def test_match_appearances_carry_a_date(tmp_path):
+    """Alternativa oneste: aparitiile pe meci se pot filtra."""
+    from predictiescor.storage.db import Database
+    db = Database(tmp_path / "aparitii.db")
+    match_id = db.upsert_match(season=2026,
+                               utc_date="2026-08-20T18:00:00+00:00",
+                               home="FCSB", away="UTA Arad",
+                               home_goals=1, away_goals=0, status="finished")
+    team_id = db.upsert_team("FCSB", source="test")
+    player_id = db.upsert_player("Ion Pop", team_id, source="test")
+    db.upsert_player_stats(match_id, player_id, team_id,
+                           {"minutes": 90, "goals": 1})
+
+    df = db.player_stats_df()
+    assert "date" in df.columns
+    assert len(df) == 1
+
+
+def test_appearances_after_the_cutoff_are_excluded(tmp_path):
+    """Verificarea propriu-zisa: ce e dupa `cutoff` nu ajunge in antrenare."""
+    import pandas as pd
+    from predictiescor.storage.db import Database
+
+    db = Database(tmp_path / "taiere.db")
+    team_id = db.upsert_team("FCSB", source="test")
+    player_id = db.upsert_player("Ion Pop", team_id, source="test")
+    for day, goals in (("2026-08-05", 1), ("2026-08-25", 3)):
+        match_id = db.upsert_match(
+            season=2026, utc_date=f"{day}T18:00:00+00:00",
+            home="FCSB", away=f"Adversar {day}", home_goals=goals,
+            away_goals=0, status="finished")
+        db.upsert_player_stats(match_id, player_id, team_id,
+                               {"minutes": 90, "goals": goals})
+
+    df = db.player_stats_df()
+    cutoff = pd.Timestamp("2026-08-10", tz="UTC")
+    before = df[pd.to_datetime(df["date"], utc=True) < cutoff]
+
+    assert len(before) == 1
+    assert float(before["goals"].sum()) == 1.0, "cele 3 goluri de pe 25 august nu au ce cauta aici"

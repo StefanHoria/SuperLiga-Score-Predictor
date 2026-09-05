@@ -169,13 +169,28 @@ def _train_side_models(pipeline, cutoff: pd.Timestamp) -> None:
             except Exception:  # noqa: BLE001
                 pipeline.secondary = None
 
-    season_stats = pipeline.db.player_season_stats_df()
-    if not season_stats.empty:
+    # Aparitiile pe meci se pot taia la `cutoff`; agregatele sezoniere NU.
+    #
+    # Aici era o scurgere din viitor: `player_season_stats` sunt totaluri
+    # cumulate PE ZI DE AZI, fara nicio coloana de data. Folosindu-le, un
+    # backfill pentru 8 august antrena modelul de marcatori pe golurile
+    # marcate DUPA acea zi - exact meciurile pe care apoi paria.
+    match_player_stats = pipeline.db.player_stats_df()
+    if not match_player_stats.empty:
+        match_player_stats = match_player_stats[
+            pd.to_datetime(match_player_stats["date"], utc=True) < cutoff]
+
+    if len(match_player_stats) >= 200:
         try:
             pipeline.players = PlayerModel.from_config(
-                pipeline.cfg.model).fit_from_season_stats(season_stats)
+                pipeline.cfg.model).fit_from_match_stats(match_player_stats)
         except Exception:  # noqa: BLE001
             pipeline.players = None
+    else:
+        # Prea putine aparitii inainte de `cutoff` ca sa antrenam onest.
+        # Agregatele sezoniere ar merge, dar ar aduce viitorul cu ele; mai bine
+        # fara model de marcatori decat cu unul care stie rezultatele.
+        pipeline.players = None
 
 
 def report(db) -> None:

@@ -969,6 +969,13 @@ tocmai fiindcă măsurătoarea nu le-a susținut. Peste câteva luni de fotograf
   explicit în loc să tacă, dar nu îl poate repara singur.
 * **Backfill-ul de bilete e onest, dar scurt.** Pe câteva zeci de bilete,
   ROI-ul e dominat de noroc. Ai nevoie de câteva sute pentru o concluzie.
+* **Cele 110 bilete de backfill din august au fost generate cu o scurgere pe
+  piața de marcatori.** Modelul de jucători folosea agregate sezoniere
+  cumulate *la zi*, care nu se pot tăia la data backtestului — deci „știa"
+  golurile marcate după ziua pentru care paria. Restul piețelor (1X2, goluri,
+  cornere, cartonașe) erau curate: acolo tăierea la `cutoff` se făcea corect.
+  Scurgerea e reparată; **cifrele vechi pe marcatori rămân optimiste** până la
+  un backfill refăcut.
 * **Logica de „valoare" nu are avantaj demonstrabil** — ba pe dezacordurile
   mari pierde măsurabil. Vezi *Când modelul nu e de acord cu piața*.
 * **Absențele nu intră în model**, deși se colectează. Vezi secțiunea de mai
