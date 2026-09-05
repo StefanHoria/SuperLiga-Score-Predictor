@@ -339,16 +339,31 @@ def _generate_next_tickets(db: Database, cfg: Config) -> str:
         TicketGenerator, load_calibration, matches_on, next_match_days,
     )
 
-    days = next_match_days(db, 1)
-    if not days:
-        return "niciun meci programat pentru bilete"
+    # Prima zi care mai are meciuri care INCA NU AU INCEPUT. Ziua de azi apare
+    # in lista chiar daca meciurile ei s-au disputat deja sau sunt in
+    # desfasurare; un "pont" pe un meci intrat in minutul 65 nu e o predictie.
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    day, matches = None, None
+    for candidate in next_match_days(db, 5):
+        upcoming = matches_on(db, candidate, include_finished=False)
+        if not upcoming.empty:
+            upcoming = upcoming[upcoming["utc_date"] > now]
+        if len(upcoming) >= 1:
+            day, matches = candidate, upcoming
+            break
+    if day is None:
+        return "niciun meci viitor pentru bilete"
 
     pipeline = PredictionPipeline(db=db, cfg=cfg).train()
     if not pipeline.ready:
         return "modelul nu s-a putut antrena pentru bilete"
 
     generator = TicketGenerator(pipeline, db, calibrator=load_calibration(db))
-    tickets = generator.build(matches_on(db, days[0]), count=8,
-                              match_day=days[0])
+    tickets = generator.build(matches, count=8, match_day=day)
     ids = generator.save(tickets)
-    return f"{len(ids)} bilete generate pentru {days[0]}"
+    if not ids:
+        return (f"niciun bilet pentru {day} "
+                f"({len(matches)} meciuri viitoare - prea puține)")
+    return f"{len(ids)} bilete generate pentru {day} ({len(matches)} meciuri)"

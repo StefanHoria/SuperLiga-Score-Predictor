@@ -313,3 +313,60 @@ def test_no_open_leg_survives_a_played_match(tmp_path):
             " WHERE l.result = 'deschis' AND m.home_goals IS NOT NULL"
         ).fetchone()["c"]
     assert remaining == 0
+
+
+# ----------------------------------------------------------------------
+# Ziua pentru care se genereaza bilete
+#
+# Ziua de azi apare in "urmatoarele zile cu meciuri" chiar daca meciurile ei
+# s-au jucat deja sau sunt in desfasurare. Construind pe ele am "prezice"
+# rezultate cunoscute, sau am da un pont pe un meci intrat in minutul 65.
+# ----------------------------------------------------------------------
+def _pick_day(db, now):
+    """Aceeasi regula ca in refresh._generate_next_tickets."""
+    from predictiescor.tickets import matches_on, next_match_days
+    for candidate in next_match_days(db, 5):
+        upcoming = matches_on(db, candidate, include_finished=False)
+        if not upcoming.empty:
+            upcoming = upcoming[upcoming["utc_date"] > now]
+        if len(upcoming) >= 1:
+            return candidate, upcoming
+    return None, None
+
+
+def test_a_day_whose_matches_all_finished_is_skipped(tmp_path):
+    from predictiescor.storage.db import Database
+    db = Database(tmp_path / "zi.db")
+    db.upsert_match(season=2026, utc_date="2026-09-05T12:00:00+00:00",
+                    home="FCSB", away="UTA Arad", home_goals=2, away_goals=0,
+                    status="finished")
+    db.upsert_match(season=2026, utc_date="2026-09-06T17:00:00+00:00",
+                    home="CFR Cluj", away="Rapid București", status="scheduled")
+
+    day, matches = _pick_day(db, "2026-09-05T15:00:00+00:00")
+    assert day == "2026-09-06"
+    assert len(matches) == 1
+
+
+def test_a_match_already_under_way_is_not_offered(tmp_path):
+    """Meciul a inceput acum 40 de minute: nu mai e obiect de predictie."""
+    from predictiescor.storage.db import Database
+    db = Database(tmp_path / "live.db")
+    db.upsert_match(season=2026, utc_date="2026-09-05T14:30:00+00:00",
+                    home="UTA Arad", away="Csikszereda", status="scheduled")
+    db.upsert_match(season=2026, utc_date="2026-09-05T17:30:00+00:00",
+                    home="Dinamo București", away="FCSB", status="scheduled")
+
+    day, matches = _pick_day(db, "2026-09-05T15:10:00+00:00")
+    assert day == "2026-09-05"
+    # numele ajunge in baza in forma canonica, fara diacritice
+    assert list(matches["home_team"]) == ["Dinamo Bucuresti"]
+
+
+def test_nothing_scheduled_gives_no_day(tmp_path):
+    from predictiescor.storage.db import Database
+    db = Database(tmp_path / "gol.db")
+    db.upsert_match(season=2026, utc_date="2026-09-05T12:00:00+00:00",
+                    home="FCSB", away="UTA Arad", home_goals=1, away_goals=1,
+                    status="finished")
+    assert _pick_day(db, "2026-09-05T15:00:00+00:00")[0] is None

@@ -232,3 +232,70 @@ def test_the_old_guessed_field_names_yield_nothing():
         "homeDraw": {"value": "1.3"}, "homeAway": {"value": "1.28"},
         "drawAway": {"value": "1.85"}}}}
     assert parse_odds(guessed, "DOUBLE_CHANCE") == []
+
+
+# ----------------------------------------------------------------------
+# Toleranta la pene de moment
+#
+# Pe 1 septembrie 2026 un singur raspuns gol a oprit tot pasul de cote si a
+# marcat actualizarea zilnica drept esuata - desi endpointul mergea perfect
+# cateva minute mai tarziu. O schimbare reala de format cade de fiecare data.
+# ----------------------------------------------------------------------
+class _FakeProvider:
+    """Doar bucata din provider care ne intereseaza, fara retea si fara baza."""
+
+    FORMAT_FAILURE_LIMIT = 3
+
+    def __init__(self, failures):
+        self.failures = list(failures)     # True = raspuns stricat
+        self.written = 0
+
+    def run(self):
+        """Copia buclei din fetch_odds, ca sa testam doar regula de oprire."""
+        consecutive, tolerated, aborted = 0, [], False
+        for broken in self.failures:
+            if broken:
+                consecutive += 1
+                tolerated.append("raspuns stricat")
+                if consecutive >= self.FORMAT_FAILURE_LIMIT:
+                    aborted = True
+                    break
+                continue
+            consecutive = 0
+            self.written += 1
+        return {"scrise": self.written, "tolerate": len(tolerated),
+                "oprit": aborted}
+
+
+def test_an_isolated_broken_response_does_not_stop_the_step():
+    out = _FakeProvider([False, True, False, False]).run()
+    assert out["oprit"] is False
+    assert out["scrise"] == 3
+    assert out["tolerate"] == 1
+
+
+def test_scattered_failures_are_tolerated():
+    """Doua pene separate de reusite nu inseamna format schimbat."""
+    out = _FakeProvider([True, False, True, False, True, False]).run()
+    assert out["oprit"] is False
+    assert out["scrise"] == 3
+
+
+def test_three_failures_in_a_row_do_stop_the_step():
+    out = _FakeProvider([False, True, True, True, False]).run()
+    assert out["oprit"] is True
+    assert out["scrise"] == 1
+
+
+def test_a_dead_endpoint_stops_immediately():
+    out = _FakeProvider([True] * 10).run()
+    assert out["oprit"] is True
+    assert out["scrise"] == 0
+    assert out["tolerate"] == 3
+
+
+def test_the_counter_resets_after_a_success():
+    """Doua pene, o reusita, inca doua: nu se opreste."""
+    out = _FakeProvider([True, True, False, True, True, False]).run()
+    assert out["oprit"] is False
+    assert out["scrise"] == 2

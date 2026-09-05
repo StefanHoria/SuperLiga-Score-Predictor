@@ -291,6 +291,9 @@ class FlashscoreProvider(DataProvider):
     #: nu atat de repede incat sa merite reinterogate la fiecare rulare
     odds_ttl_hours: float = 3.0
 
+    #: cate raspunsuri stricate LA RAND inseamna ca s-a schimbat formatul
+    FORMAT_FAILURE_LIMIT: int = 3
+
     def fetch_odds(self, *, days_ahead: int = 10, max_requests: int = 120,
                    bookmaker_limit: int = 3,
                    bet_types: tuple[str, ...] = ("HOME_DRAW_AWAY",
@@ -323,6 +326,8 @@ class FlashscoreProvider(DataProvider):
         books = self.bookmakers_for(wanted[0].external_id)[:bookmaker_limit]
         per_match = max(1, len(books) * len(bet_types))
         spent = 0
+        consecutive_failures = 0
+        tolerated: list[str] = []
 
         for match in wanted:
             if spent + per_match > max_requests:
@@ -332,17 +337,31 @@ class FlashscoreProvider(DataProvider):
                 continue
             try:
                 by_book = self.match_odds(match.external_id, books, bet_types)
+                consecutive_failures = 0
             except OddsFormatChanged as exc:
-                result.errors.append(
-                    f"formatul cotelor s-a schimbat ({exc}); "
-                    f"sursa a fost oprita pentru rularea asta")
-                break
+                # Un raspuns stricat izolat e o pana de moment, nu o schimbare
+                # de format: pe 1 septembrie 2026 un singur raspuns gol a oprit
+                # tot pasul si a marcat actualizarea zilnica drept esuata, desi
+                # endpointul mergea perfect. O schimbare reala de format cade
+                # de fiecare data, nu o data.
+                consecutive_failures += 1
+                tolerated.append(str(exc))
+                if consecutive_failures >= self.FORMAT_FAILURE_LIMIT:
+                    result.errors.append(
+                        f"cotele au esuat de {consecutive_failures} ori la rand "
+                        f"({exc}); probabil s-a schimbat formatul")
+                    break
+                spent += per_match
+                continue
             spent += per_match
             if not by_book:
                 continue
             result.odds += self._write_odds(match_id, by_book)
             result.matches += 1
 
+        if tolerated and not result.errors:
+            log.info("cote: %d meciuri sarite din cauza unor raspunsuri "
+                     "stricate izolate", len(tolerated))
         return result
 
     def _resolve_match(self, match: LiveMatch) -> int | None:
