@@ -393,6 +393,20 @@ CREATE INDEX IF NOT EXISTS idx_news_facts_kind
 CREATE INDEX IF NOT EXISTS idx_news_facts_player ON news_facts(player_id);
 
 -- ------------------------------------------------------------------
+-- Ce stie omul si sursele nu
+-- ------------------------------------------------------------------
+-- Transfermarkt isi actualizeaza loturile cu intarziere, iar presa nu scrie
+-- despre orice plecare. Cand utilizatorul stie ca un jucator a plecat, o poate
+-- spune aici, iar modelul il exclude ca pe oricare altul. Marcajul e reversibil
+-- si nu sterge nimic - doar il scoate din predictii.
+CREATE TABLE IF NOT EXISTS manual_departures (
+    player_id INTEGER PRIMARY KEY REFERENCES players(player_id)
+                  ON DELETE CASCADE,
+    noted_at  TEXT NOT NULL,
+    note      TEXT
+);
+
+-- ------------------------------------------------------------------
 -- Metadate
 -- ------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS meta (

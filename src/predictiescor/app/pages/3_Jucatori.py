@@ -155,6 +155,48 @@ with tab_absent:
         )
         st.divider()
 
+    # ---- marcaj manual ----
+    with st.container(border=True):
+        st.markdown("#### Știi tu mai bine decât sursele?")
+        st.caption(
+            "Transfermarkt actualizează loturile cu întârziere, iar presa nu "
+            "scrie despre orice plecare. Dacă știi că un jucător nu mai e la "
+            "club, spune-o aici — îl excludem din predicții ca pe oricare "
+            "altul. Marcajul e reversibil și nu șterge nimic."
+        )
+        loturi = _db.squads_df() if hasattr(_db, "squads_df") else None
+        with _db.connect() as _conn:
+            candidati = _conn.execute(
+                "SELECT p.player_id, p.name, t.name AS echipa FROM players p"
+                " JOIN teams t ON t.team_id = p.team_id"
+                " WHERE p.team_id IS NOT NULL ORDER BY t.name, p.name"
+            ).fetchall()
+        optiuni = {f"{r['name']} ({r['echipa']})": int(r["player_id"])
+                   for r in candidati}
+        c1, c2 = st.columns([3, 1])
+        ales = c1.selectbox("Jucătorul", ["—"] + sorted(optiuni),
+                            key="marcaj_plecat")
+        if c2.button("Marchează plecat", disabled=(ales == "—")):
+            _db.mark_departed(optiuni[ales], note="marcat manual din aplicație")
+            st.cache_data.clear()
+            st.cache_resource.clear()
+            st.success(f"{ales} — exclus din predicții.")
+            st.rerun()
+
+        manuale = _db.manual_departures()
+        if not manuale.empty:
+            st.caption("Marcate manual:")
+            for r in manuale.itertuples():
+                m1, m2 = st.columns([4, 1])
+                m1.markdown(f"• **{r.player_name}** — încă listat la "
+                            f"{r.echipa or 'niciun club'}")
+                if m2.button("Anulează", key=f"anul_{r.player_id}"):
+                    _db.unmark_departed(int(r.player_id))
+                    st.cache_data.clear()
+                    st.cache_resource.clear()
+                    st.rerun()
+
+    st.divider()
     absences = _db.availability_df()
     if absences.empty:
         st.info("Nu există date despre accidentări sau suspendări.")

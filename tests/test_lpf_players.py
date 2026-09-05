@@ -257,13 +257,15 @@ def test_departed_players_are_those_with_history_but_no_club(squad):
 # dar mai putin sigura - de aceea cerem "confirmat", nu zvon.
 # ----------------------------------------------------------------------
 def _news_departure(db, player_id, source, certainty="confirmat"):
+    """Faptul trebuie sa numeasca chiar clubul curent - altfel e ignorat."""
     article = db.upsert_news_article(
         url=f"https://{source}/{player_id}-{certainty}", source=source,
         title="A plecat", published_at="2026-09-05T12:00:00+00:00")
     db.save_news_facts(article, [{
         "kind": "transfer_plecare", "certainty": certainty,
         "player_name": "Daniel Bîrligea", "player_id": player_id,
-        "evidence": "a plecat de la FCSB"}])
+        "team": "FCSB",
+        "evidence": "Daniel Bîrligea a plecat de la FCSB"}])
 
 
 def test_a_confirmed_departure_is_surfaced(tmp_path):
@@ -297,7 +299,8 @@ def test_sources_are_counted_not_articles(tmp_path):
         db.save_news_facts(article, [{
             "kind": "transfer_plecare", "certainty": "confirmat",
             "player_name": "Daniel Bîrligea", "player_id": pid,
-            "evidence": "a plecat"}])
+            "team": "FCSB",
+            "evidence": "Daniel Bîrligea a plecat de la FCSB"}])
     assert int(db.reported_departures().iloc[0]["surse"]) == 1
 
 
@@ -319,3 +322,106 @@ def test_the_threshold_of_sources_can_be_raised(tmp_path):
     _news_departure(db, pid, "fanatik.ro")
     assert db.reported_departures(min_sources=1).shape[0] == 1
     assert db.reported_departures(min_sources=2).empty
+
+
+# ----------------------------------------------------------------------
+# Corectiile la detectarea plecarilor
+#
+# Din 8 jucatori semnalati, 4 erau gresiti. Trei cauze distincte, fiecare cu
+# testul ei - altfel se intorc.
+# ----------------------------------------------------------------------
+def _departure(db, player_id, team_id, evidence, source="fanatik.ro",
+               kind="transfer_plecare", certainty="confirmat", when="2026-09-05"):
+    article = db.upsert_news_article(
+        url=f"https://{source}/{player_id}/{kind}/{when}", source=source,
+        title="stire", published_at=f"{when}T12:00:00+00:00")
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO news_facts(article_id, kind, team_id, player_id,"
+            " player_name, certainty, evidence, published_at, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            (article, kind, team_id, player_id,
+             conn.execute("SELECT name FROM players WHERE player_id=?",
+                          (player_id,)).fetchone()["name"],
+             certainty, evidence, f"{when}T12:00:00+00:00", "2026-09-05"))
+
+
+def test_a_departure_from_a_former_club_is_ignored(tmp_path):
+    """„El Sawy a plecat de la Rapid" — dar el e la UTA Arad."""
+    db = _Database(tmp_path / "fost.db")
+    uta = db.upsert_team("UTA Arad", source="test")
+    rapid = db.upsert_team("Rapid Bucuresti", source="test")
+    pid = db.upsert_player("Omar El Sawy", uta, source="test")
+    _departure(db, pid, rapid, "Omar El Sawy a dezvăluit de ce a plecat de la Rapid")
+    assert db.reported_departures().empty
+
+
+def test_a_departure_from_the_current_club_counts(tmp_path):
+    db = _Database(tmp_path / "curent.db")
+    fcsb = db.upsert_team("FCSB", source="test")
+    pid = db.upsert_player("Florin Tănase", fcsb, source="test")
+    _departure(db, pid, fcsb, "Florin Tănase a plecat de la FCSB!")
+    assert list(db.reported_departures()["player_name"]) == ["Florin Tănase"]
+
+
+def test_a_later_return_cancels_the_departure(tmp_path):
+    """Crețu s-a despărțit de FCSB, apoi Becali a revenit asupra deciziei."""
+    db = _Database(tmp_path / "revenit.db")
+    fcsb = db.upsert_team("FCSB", source="test")
+    pid = db.upsert_player("Valentin Crețu", fcsb, source="test")
+    _departure(db, pid, fcsb, "Valentin Crețu s-a despărțit de FCSB",
+               when="2026-08-30")
+    _departure(db, pid, fcsb, "Valentin Crețu a revenit în lotul FCSB",
+               kind="revenire", when="2026-08-31")
+    assert db.reported_departures().empty
+
+
+def test_an_arrival_worded_like_a_departure_is_ignored(tmp_path):
+    """„cedat de CFR **la** FCSB" e o venire la FCSB, nu o plecare."""
+    db = _Database(tmp_path / "venire.db")
+    fcsb = db.upsert_team("FCSB", source="test")
+    pid = db.upsert_player("Daniel Bîrligea", fcsb, source="test")
+    _departure(db, pid, fcsb,
+               "Bîrligea a fost cedat de CFR la FCSB pentru 2 milioane de euro.")
+    assert db.reported_departures().empty
+
+
+def test_the_direction_helper_reads_the_preposition():
+    from predictiescor.storage.db import _is_destination
+    assert _is_destination("cedat de CFR la FCSB", "FCSB") is True
+    assert _is_destination("a plecat de la FCSB", "FCSB") is False
+    assert _is_destination("pleacă de la FCSB la Omonia", "FCSB") is False
+
+
+# ----------------------------------------------------------------------
+# Marcajul manual
+# ----------------------------------------------------------------------
+def test_a_manual_mark_excludes_the_player(tmp_path):
+    db = _Database(tmp_path / "manual.db")
+    team = db.upsert_team("FCSB", source="test")
+    pid = db.upsert_player("Daniel Bîrligea", team, source="test")
+    assert "Daniel Bîrligea" not in db.departed_players()
+
+    db.mark_departed(pid, note="știu că a plecat")
+    assert "Daniel Bîrligea" in db.departed_players()
+
+
+def test_a_manual_mark_can_be_undone(tmp_path):
+    db = _Database(tmp_path / "anulare.db")
+    team = db.upsert_team("FCSB", source="test")
+    pid = db.upsert_player("Daniel Bîrligea", team, source="test")
+    db.mark_departed(pid)
+    db.unmark_departed(pid)
+    assert "Daniel Bîrligea" not in db.departed_players()
+    assert db.manual_departures().empty
+
+
+def test_marking_twice_does_not_duplicate(tmp_path):
+    db = _Database(tmp_path / "dublu.db")
+    team = db.upsert_team("FCSB", source="test")
+    pid = db.upsert_player("Ion Pop", team, source="test")
+    db.mark_departed(pid, note="prima")
+    db.mark_departed(pid, note="a doua")
+    marks = db.manual_departures()
+    assert len(marks) == 1
+    assert marks.iloc[0]["note"] == "a doua"

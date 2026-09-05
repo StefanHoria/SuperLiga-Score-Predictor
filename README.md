@@ -1013,9 +1013,30 @@ lot:
 | Daniel Bîrligea | FCSB | 1 |
 
 **Îi excludem din predicții** când articolul afirmă plecarea ca fapt
-(`confirmat`), nu ca zvon. Judecata din spate: costul unei excluderi greșite e
-mic — un jucător în plus care nu apare în lista de marcatori. Costul unei
-predicții pe cineva care nu mai e la club e vizibil și jenant.
+(`confirmat`), nu ca zvon.
+
+### Verificate una câte una
+
+Prima versiune semnala 8 jucători. Citindu-le pe rând, **4 erau greșite** —
+trei cauze distincte, fiecare reparată și acoperită de un test:
+
+| Greșeala | Cauza | Regula adăugată |
+|---|---|---|
+| „El Sawy a plecat de la **Rapid**" — el e la UTA Arad | plecare de la un club anterior | clubul din propoziție trebuie să fie clubul lui de acum |
+| „Țicu pleacă de la **Dinamo**" — el e la Farul | idem | idem |
+| Crețu s-a despărțit de FCSB… apoi a revenit | plecare anulată ulterior | o revenire confirmată mai nouă anulează plecarea |
+| „Bîrligea a fost cedat de CFR **la** FCSB" | e o *venire*, cu același verb | „de la X" = dinspre X; „la Y" = către Y |
+
+Au rămas 4, toate corecte. Verificat și invers: Crețu e din nou în predicții
+pentru FCSB, Țicu pentru Farul.
+
+### Când nici sursele nu știu
+
+Bîrligea chiar plecase — la Frosinone — dar **nicio sursă nu o spunea**:
+Transfermarkt îl lista, iar cele două știri despre el descriau *venirea* de la
+CFR. Pentru astfel de cazuri există marcajul manual, pe pagina *Jucători →
+Absenți*: îl marchezi plecat, e exclus ca oricare altul, iar marcajul se poate
+anula. Nu șterge nimic.
 
 Conflictele se văd pe pagina **Jucători → Absenți**, cu propoziția din articol,
 ca să le poți verifica. Nu ascundem dezacordul, îl arătăm.

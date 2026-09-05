@@ -841,12 +841,44 @@ class Database:
         """
         sql = """
             SELECT DISTINCT p.name FROM players p
-            WHERE p.team_id IS NULL
-              AND EXISTS (SELECT 1 FROM player_match_stats s
-                           WHERE s.player_id = p.player_id)
+            WHERE (
+                    p.team_id IS NULL
+                    AND EXISTS (SELECT 1 FROM player_match_stats s
+                                 WHERE s.player_id = p.player_id)
+                  )
+               -- si cei marcati de mana: uneori omul stie inaintea surselor
+               OR EXISTS (SELECT 1 FROM manual_departures d
+                           WHERE d.player_id = p.player_id)
         """
         with self.connect() as conn:
             return {str(r["name"]) for r in conn.execute(sql) if r["name"]}
+
+    def mark_departed(self, player_id: int, note: str | None = None) -> None:
+        """Marcheaza manual un jucator ca plecat. Reversibil."""
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO manual_departures(player_id, noted_at, note)"
+                " VALUES (?,?,?) ON CONFLICT(player_id) DO UPDATE SET"
+                "   noted_at = excluded.noted_at, note = excluded.note",
+                (int(player_id), _utcnow(), note))
+
+    def unmark_departed(self, player_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM manual_departures WHERE player_id = ?",
+                         (int(player_id),))
+
+    def manual_departures(self) -> pd.DataFrame:
+        """Jucatorii marcati de mana ca plecati, cu echipa la care apar inca."""
+        sql = """
+            SELECT d.player_id, p.name AS player_name, t.name AS echipa,
+                   d.noted_at, d.note
+            FROM manual_departures d
+            JOIN players p ON p.player_id = d.player_id
+            LEFT JOIN teams t ON t.team_id = p.team_id
+            ORDER BY d.noted_at DESC
+        """
+        with self.connect() as conn:
+            return pd.read_sql_query(sql, conn)
 
     def reported_departures(self, *, min_sources: int = 1) -> pd.DataFrame:
         """Jucatori dati plecati de presa, dar inca in lot la Transfermarkt.
@@ -868,12 +900,30 @@ class Database:
             JOIN teams t ON t.team_id = p.team_id
             WHERE f.kind = 'transfer_plecare' AND f.certainty = 'confirmat'
               AND p.team_id IS NOT NULL
+              -- Clubul din propozitie trebuie sa fie chiar clubul lui de acum.
+              -- Altfel prindem plecari de la fostele echipe: "Omar El Sawy a
+              -- dezvaluit de ce a plecat de la Rapid" - el e la UTA Arad.
+              AND f.team_id = p.team_id
+              -- O plecare anulata de o revenire ulterioara nu mai e o plecare.
+              -- Cretu s-a despartit de FCSB, apoi Becali a revenit asupra
+              -- deciziei si a fost reprimit.
+              AND NOT EXISTS (
+                    SELECT 1 FROM news_facts r
+                    JOIN news_articles ra ON ra.article_id = r.article_id
+                    WHERE r.player_id = f.player_id
+                      AND r.kind = 'revenire' AND r.certainty = 'confirmat'
+                      AND ra.published_at >= a.published_at)
             GROUP BY f.player_id, f.player_name, t.name
             HAVING surse >= ?
             ORDER BY surse DESC, ultima DESC
         """
         with self.connect() as conn:
-            return pd.read_sql_query(sql, conn, params=[int(min_sources)])
+            frame = pd.read_sql_query(sql, conn, params=[int(min_sources)])
+        if frame.empty:
+            return frame
+        keep = [not _is_destination(str(r.dovada or ""), str(r.echipa))
+                for r in frame.itertuples()]
+        return frame[keep].reset_index(drop=True)
 
     def detach_missing_players(self, team_id: int,
                                still_here: Iterable[int]) -> int:
@@ -1090,3 +1140,21 @@ class Database:
         """
         with self.connect() as conn:
             return pd.read_sql_query(sql, conn)
+
+
+def _is_destination(evidence: str, club: str) -> bool:
+    """Clubul e DESTINATIA transferului, nu locul de unde pleaca?
+
+    "Birligea a fost cedat de CFR **la FCSB**" descrie o venire la FCSB, nu o
+    plecare de acolo - dar are acelasi verb ca o plecare. Diferenta o face
+    prepozitia: "de la X" inseamna dinspre X, "la Y" inseamna catre Y.
+    """
+    from ..utils.teamnames import strip_diacritics
+
+    text = strip_diacritics(evidence).lower()
+    name = strip_diacritics(club).lower()
+    if not name or name not in text:
+        return False
+    at = text.find(name)
+    inainte = text[max(0, at - 6):at]
+    return " la " in inainte and "de la " not in inainte
