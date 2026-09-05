@@ -156,7 +156,8 @@ class PredictionPipeline:
             try:
                 self.players = PlayerModel.from_config(
                     self.cfg.model).fit_from_match_stats(
-                        match_player_stats, season_stats)
+                        match_player_stats, season_stats,
+                        current_teams=self.db.current_squads())
             except Exception as exc:  # noqa: BLE001
                 self.warnings.append(
                     f"Modelul de jucatori pe meci a esuat ({exc}); "

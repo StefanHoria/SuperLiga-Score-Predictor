@@ -925,6 +925,22 @@ class Database:
                 for r in frame.itertuples()]
         return frame[keep].reset_index(drop=True)
 
+    def current_squads(self) -> dict[str, str]:
+        """La ce echipa e ACUM fiecare jucator: {nume jucator: nume echipa}.
+
+        Modelul de marcatori isi lua echipa din aparitiile istorice, deci un
+        transferat ramanea la clubul vechi pana aduna meciuri la cel nou. Lotul
+        e sursa corecta pentru "unde e acum".
+        """
+        sql = """
+            SELECT p.name AS player, t.name AS team
+            FROM players p JOIN teams t ON t.team_id = p.team_id
+            WHERE p.team_id IS NOT NULL
+        """
+        with self.connect() as conn:
+            return {str(r["player"]): str(r["team"])
+                    for r in conn.execute(sql) if r["player"] and r["team"]}
+
     def player_at_other_team(self, name: str, team_id: int) -> int | None:
         """Acelasi jucator, dar inregistrat la alta echipa. `None` daca nu e.
 

@@ -1064,11 +1064,28 @@ FCSB, cu istoricul rupt în două. Acum, înainte de a crea un rând, se caută
 jucătorul la celelalte echipe — potrivire exactă pe nume, ca să nu unim oameni
 diferiți — și se mută.
 
-**Limitare rămasă:** modelul de marcatori grupează aparițiile pe `(jucător,
-echipă)`, deci după un transfer jucătorul repornește de la zero la clubul nou.
-Korenica are 418 minute, dar doar 45 la FCSB — sub pragul de 270, deci nu apare
-în predicțiile FCSB până nu adună destule. Ratele lui de la CFR rămân
-nefolosite, deși golurile pe 90 de minute sunt o însușire a lui, nu a echipei.
+### Un jucător, un singur rând
+
+Modelul grupa aparițiile pe `(jucător, echipă)`, deci un transfer îi rupea
+istoricul în două: Korenica avea 418 minute, dar doar 45 la FCSB — sub pragul de
+270, deci absent din predicțiile FCSB, în timp ce ratele lui de la CFR stăteau
+nefolosite.
+
+Acum gruparea e pe **jucător**, cu o separație care contează:
+
+* **ratele la 90 de minute** (goluri, assist-uri, cartonașe) se calculează din
+  *toate* aparițiile — sunt însușirea lui, nu a clubului;
+* **minutele așteptate** se calculează doar din meciurile la clubul **actual**,
+  raportate la câte meciuri a avut clubul de când a venit — rolul lui acolo e
+  altă poveste decât la clubul precedent.
+
+Echipa vine din lotul curent (`current_squads()`), nu din majoritatea
+aparițiilor. Korenica apare acum la FCSB cu 45 de minute așteptate — exact cât
+a jucat acolo — dar cu rata de goluri din toate cele 418.
+
+Al doilea duplicat venea din completarea cu totaluri de sezon: acelea stau sub
+clubul vechi, iar verificarea „îl am deja?" se făcea *pe echipă*, deci nu-l
+găsea. Se caută acum și fără echipă.
 
 ### Și cine chiar a plecat din ligă
 

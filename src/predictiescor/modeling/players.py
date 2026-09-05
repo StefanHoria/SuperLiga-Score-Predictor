@@ -149,7 +149,8 @@ class PlayerModel:
 
     # ------------------------------------------------------------------
     def fit_from_match_stats(self, match_stats: pd.DataFrame,
-                             season_stats: pd.DataFrame | None = None
+                             season_stats: pd.DataFrame | None = None,
+                             current_teams: dict[str, str] | None = None
                              ) -> "PlayerModel":
         """Antreneaza din aparitii pe meci - mai bun decat agregatele sezoniere.
 
@@ -163,6 +164,15 @@ class PlayerModel:
            o data la cinci etape ar aparea cu 90 de minute asteptate. Impartim
            minutele la numarul de meciuri ale ECHIPEI, nu la aparitiile lui,
            deci rezervele primesc valori realiste.
+
+        Un jucator are UN SINGUR rand, oricate echipe ar fi schimbat. Golurile
+        la 90 de minute sunt insusirea lui, nu a clubului: gruparea pe
+        `(jucator, echipa)` ii rupea istoricul la fiecare transfer si il facea
+        invizibil la clubul nou pana aduna destule minute acolo. Korenica avea
+        418 minute, dar doar 45 la FCSB - sub prag, deci absent din predictii.
+
+        `current_teams` spune la ce echipa e ACUM fiecare jucator (din lot).
+        Fara el, luam echipa ultimei aparitii.
         """
         data = match_stats.copy()
         if data.empty:
@@ -218,8 +228,19 @@ class PlayerModel:
             means["assists"] = assist_means.get(group, assist_means.get(
                 "_toate", means["assists"]))
 
-        grouped = data.groupby(["player", "team"], dropna=False)
-        for (player, team), chunk in grouped:
+        # La ce echipa e fiecare jucator ACUM: lotul curent daca il stim,
+        # altfel echipa ultimei aparitii.
+        latest = (data.sort_values("date")
+                  .drop_duplicates(subset=["player"], keep="last")
+                  .set_index("player")["team"].to_dict())
+        current = dict(latest)
+        if current_teams:
+            current.update({k: v for k, v in current_teams.items()
+                            if k in latest and v})
+
+        grouped = data.groupby("player", dropna=False)
+        for player, chunk in grouped:
+            team = current.get(player, chunk["team"].iloc[-1])
             weights = chunk["w"].to_numpy()
             minutes = float((chunk["minutes"] * weights).sum())
             nineties = minutes / 90.0
@@ -243,9 +264,9 @@ class PlayerModel:
                 goals_per90=self._shrink(
                     float((chunk["goals"] * weights).sum()), nineties,
                     means["goals"], k),
-                assists_per90=assists_per90.get(
-                    self._key(str(player),
-                              str(team) if pd.notna(team) else "necunoscut"),
+                assists_per90=self._assists_for(
+                    assists_per90, str(player),
+                    str(team) if pd.notna(team) else "necunoscut",
                     means["assists"]),
                 cards_per90=self._shrink(
                     float((chunk["cards"] * weights).sum()), nineties,
@@ -254,10 +275,27 @@ class PlayerModel:
 
             # Minute asteptate = minute ponderate / meciurile ECHIPEI, nu ale
             # jucatorului: asa intra in calcul si etapele in care n-a jucat.
-            played_by_team = team_matches.get(rates.team, 0.0)
-            if played_by_team > 0:
+            #
+            # Pentru minute contam DOAR aparitiile la clubul actual: rolul lui
+            # acolo e alta poveste decat la clubul precedent. Ratele la 90 de
+            # minute raman calculate din tot, fiindca sunt insusirea lui.
+            la_club = chunk[chunk["team"] == team]
+            minute_la_club = float((la_club["minutes"] * la_club["w"]).sum())
+            meciuri_club = team_matches.get(team, 0.0)
+            if meciuri_club > 0 and not la_club.empty:
+                # cate meciuri a avut clubul de cand a venit el
+                de_cand = la_club["date"].min()
+                meciuri_de_cand = float(
+                    data[(data["team"] == team) & (data["date"] >= de_cand)]
+                    .drop_duplicates(subset=["match_id"])["w"].sum())
+                numitor = meciuri_de_cand or meciuri_club
                 rates.expected_minutes = float(
-                    min(90.0, minutes / played_by_team))
+                    min(90.0, minute_la_club / numitor))
+            elif meciuri_club > 0:
+                # transferat, dar inca fara meci la clubul nou: pornim de la
+                # cat juca inainte, temperat - rolul lui acolo e necunoscut
+                rates.expected_minutes = float(
+                    min(90.0, 0.5 * minutes / meciuri_club))
             else:
                 rates.expected_minutes = float(
                     min(90.0, chunk["minutes"].mean()))
@@ -350,8 +388,13 @@ class PlayerModel:
             return set(strip_diacritics(str(value)).lower().split())
 
         known: dict[str, list[set[str]]] = {}
+        # Si un index FARA echipa: dupa un transfer, totalurile de sezon stau
+        # sub clubul vechi, deci cautarea pe echipa nu l-ar gasi si l-am adauga
+        # a doua oara - jucatorul ar aparea in predictii la ambele cluburi.
+        oriunde: list[set[str]] = []
         for rates in self.rates.values():
             known.setdefault(rates.team, []).append(name_tokens(rates.player))
+            oriunde.append(name_tokens(rates.player))
 
         for row in data.itertuples():
             team = str(getattr(row, "team", "") or "necunoscut")
@@ -361,6 +404,9 @@ class PlayerModel:
             tokens = name_tokens(str(row.player))
             if any(len(tokens & existing) >= 2
                    for existing in known.get(team, [])):
+                continue
+            # acelasi om, dar inregistrat la alt club: e deja in model
+            if any(len(tokens & existing) >= 2 for existing in oriunde):
                 continue
             nineties = float(row.minutes) / 90.0
             group = position_group(getattr(row, "position", None))
@@ -387,6 +433,21 @@ class PlayerModel:
     @staticmethod
     def _key(player: str, team: str) -> str:
         return f"{player}||{team}"
+
+    @staticmethod
+    def _assists_for(table: dict[str, float], player: str, team: str,
+                     fallback: float) -> float:
+        """Rata de assist-uri a jucatorului, oriunde ar fi inregistrata.
+
+        Totalurile de sezon sunt pe `(jucator, echipa)`. Dupa un transfer, ele
+        stau sub clubul VECHI, deci cautarea directa n-ar gasi nimic.
+        """
+        direct = table.get(PlayerModel._key(player, team))
+        if direct is not None:
+            return direct
+        prefix = f"{player}||"
+        oriunde = [v for k, v in table.items() if k.startswith(prefix)]
+        return oriunde[0] if oriunde else fallback
 
     @staticmethod
     def _shrink(total: float, nineties: float, prior: float, k: float) -> float:

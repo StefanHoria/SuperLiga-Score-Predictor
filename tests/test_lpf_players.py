@@ -571,3 +571,79 @@ def test_merging_two_records_joins_the_history(tmp_path):
                             " WHERE name='Meriton Korenica'").fetchone()["c"] == 1
         assert conn.execute("SELECT COUNT(*) c FROM player_match_stats"
                             " WHERE player_id=?", (vechi,)).fetchone()["c"] == 2
+
+
+# ----------------------------------------------------------------------
+# Modelul: un jucator, un singur rand
+#
+# Gruparea pe (jucator, echipa) ii rupea istoricul la fiecare transfer si il
+# facea invizibil la clubul nou pana aduna 270 de minute acolo. Korenica avea
+# 418 minute in total, dar doar 45 la FCSB.
+# ----------------------------------------------------------------------
+def _appearances(rows):
+    """rows: (jucator, echipa, data, minute, goluri)."""
+    import pandas as _pd
+    return _pd.DataFrame([
+        {"player": p, "team": t, "date": d, "minutes": m, "goals": g,
+         "assists": 0, "yellow_cards": 0, "red_cards": 0, "position": "Attack",
+         "match_id": i}
+        for i, (p, t, d, m, g) in enumerate(rows)
+    ])
+
+
+def _model():
+    from predictiescor.modeling.players import PlayerModel
+    return PlayerModel(min_minutes=0, half_life_days=240, shrinkage_per90=1.0)
+
+
+def test_a_transferred_player_keeps_one_row():
+    rows = [("Meriton Korenica", "CFR Cluj", "2026-08-16", 90, 1),
+            ("Meriton Korenica", "CFR Cluj", "2026-08-23", 90, 1),
+            ("Meriton Korenica", "FCSB", "2026-09-05", 45, 0),
+            ("Altul", "FCSB", "2026-09-05", 90, 0)]
+    model = _model().fit_from_match_stats(_appearances(rows))
+    korenica = [r for r in model.rates.values() if "Korenica" in r.player]
+    assert len(korenica) == 1
+
+
+def test_he_is_listed_at_his_current_club():
+    rows = [("Meriton Korenica", "CFR Cluj", "2026-08-16", 90, 1),
+            ("Meriton Korenica", "FCSB", "2026-09-05", 45, 0),
+            ("Altul", "FCSB", "2026-09-05", 90, 0)]
+    model = _model().fit_from_match_stats(_appearances(rows))
+    assert "Meriton Korenica" in [model.rates[k].player
+                                  for k in model.by_team["FCSB"]]
+    assert "Meriton Korenica" not in [model.rates[k].player
+                                      for k in model.by_team.get("CFR Cluj", [])]
+
+
+def test_the_squad_overrides_the_last_appearance():
+    """Daca lotul spune altceva decat ultimul meci, lotul castiga."""
+    rows = [("Ion Pop", "CFR Cluj", "2026-08-16", 90, 1),
+            ("Altul", "FCSB", "2026-09-05", 90, 0)]
+    model = _model().fit_from_match_stats(
+        _appearances(rows), current_teams={"Ion Pop": "FCSB"})
+    assert "Ion Pop" in [model.rates[k].player for k in model.by_team["FCSB"]]
+
+
+def test_all_his_minutes_count_toward_the_rate():
+    """Ratele la 90 de minute sunt insusirea lui, nu a clubului."""
+    rows = [("Meriton Korenica", "CFR Cluj", "2026-08-16", 90, 1),
+            ("Meriton Korenica", "CFR Cluj", "2026-08-23", 90, 1),
+            ("Meriton Korenica", "FCSB", "2026-09-05", 45, 0),
+            ("Altul", "FCSB", "2026-09-05", 90, 0)]
+    model = _model().fit_from_match_stats(_appearances(rows))
+    korenica = next(r for r in model.rates.values() if "Korenica" in r.player)
+    assert korenica.minutes == 225.0, "toate minutele, nu doar cele de la FCSB"
+    assert korenica.goals_per90 > 0.3, "cele doua goluri de la CFR conteaza"
+
+
+def test_expected_minutes_come_from_the_current_club_only():
+    """Rolul lui la clubul nou e alta poveste decat la cel vechi."""
+    rows = [("Ion Pop", "CFR Cluj", "2026-08-16", 90, 0),
+            ("Ion Pop", "CFR Cluj", "2026-08-23", 90, 0),
+            ("Ion Pop", "FCSB", "2026-09-05", 30, 0),
+            ("Altul", "FCSB", "2026-09-05", 90, 0)]
+    model = _model().fit_from_match_stats(_appearances(rows))
+    pop = next(r for r in model.rates.values() if r.player == "Ion Pop")
+    assert pop.expected_minutes < 45, "30 de minute la FCSB, nu 90 ca la CFR"
