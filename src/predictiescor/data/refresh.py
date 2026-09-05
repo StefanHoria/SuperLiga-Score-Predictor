@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -29,6 +30,47 @@ log = logging.getLogger(__name__)
 ProgressFn = Callable[[int, int, str], None]
 
 OK, FAILED, SKIPPED = "ok", "eșuat", "sărit"
+
+#: Cat timp ramane proaspat un pas scump, in ore.
+#:
+#: Pasii ieftini (rezultate, scor live, calendar, stiri) ruleaza mereu - dureaza
+#: secunde si aduc exact lucrurile care se schimba des. Cei de mai jos costa
+#: minute intregi, iar reluarea lor la fiecare apasare n-ar aduce nimic:
+#: loturile nu se schimba de doua ori pe zi, iar cotele nu se misca in cinci
+#: minute cat sa merite inca sase minute de cereri.
+FRESH_HOURS: dict[str, float] = {
+    "Cote pre-meci (Flashscore)": 3.0,
+    "Loturi și jucători": 12.0,
+    "Statistici detaliate pe meci": 6.0,
+}
+
+#: cheia sub care tinem minte cand a mers ultima oara fiecare pas
+_LAST_RUN_KEY = "refresh_last_ok"
+
+
+def _last_success(db: Database) -> dict[str, str]:
+    with db.connect() as conn:
+        row = conn.execute("SELECT value FROM meta WHERE key = ?",
+                           (_LAST_RUN_KEY,)).fetchone()
+    if not row or not row["value"]:
+        return {}
+    import json
+    try:
+        return dict(json.loads(str(row["value"])))
+    except (ValueError, TypeError):
+        return {}
+
+
+def _mark_success(db: Database, step: str) -> None:
+    import json
+    
+    done = _last_success(db)
+    done[step] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO meta(key, value) VALUES (?,?)"
+            " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (_LAST_RUN_KEY, json.dumps(done)))
 
 
 @dataclass
@@ -76,6 +118,7 @@ def run_refresh(
     with_players: bool = True,
     api_budget: int | None = None,
     with_tickets: bool = False,
+    force_all: bool = False,
     progress: ProgressFn | None = None,
 ) -> RefreshReport:
     """Aduce datele noi din toate sursele active si intoarce un raport.
@@ -111,12 +154,41 @@ def run_refresh(
     class Skip(Exception):
         """Pasul nu are ce face - nu e o eroare."""
 
+    done_at = _last_success(db)
+
+    def _is_fresh(name: str) -> str | None:
+        """Cat de recent a mers pasul, daca e prea recent ca sa merite reluat."""
+        window = FRESH_HOURS.get(name)
+        if not window or force_all:
+            return None
+        stamp = done_at.get(name)
+        if not stamp:
+            return None
+        try:
+            when = datetime.fromisoformat(stamp)
+        except ValueError:
+            return None
+        age = (datetime.now(timezone.utc) - when).total_seconds() / 3600
+        if age >= window:
+            return None
+        minutes = int(age * 60)
+        return (f"proaspăt (acum {minutes} min)" if minutes < 90
+                else f"proaspăt (acum {age:.1f} ore)")
+
     def record(name: str, fn: Callable[[], str]) -> None:
         announce(name)
         step = RefreshStep(name)
         clock = time.monotonic()
+        fresh = _is_fresh(name)
+        if fresh:
+            step.status = SKIPPED
+            step.detail = fresh
+            report.steps.append(step)
+            return
         try:
             step.detail = fn()
+            if name in FRESH_HOURS:
+                _mark_success(db, name)
         except Skip as exc:
             step.status = SKIPPED
             step.detail = str(exc)
@@ -342,8 +414,7 @@ def _generate_next_tickets(db: Database, cfg: Config) -> str:
     # Prima zi care mai are meciuri care INCA NU AU INCEPUT. Ziua de azi apare
     # in lista chiar daca meciurile ei s-au disputat deja sau sunt in
     # desfasurare; un "pont" pe un meci intrat in minutul 65 nu e o predictie.
-    from datetime import datetime, timezone
-
+    
     now = datetime.now(timezone.utc).isoformat()
     day, matches = None, None
     for candidate in next_match_days(db, 5):

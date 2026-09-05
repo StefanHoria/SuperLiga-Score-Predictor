@@ -87,7 +87,8 @@ def bump_data_version() -> None:
 
 def run_data_refresh(*, quick: bool = True, with_players: bool = True,
                      api_budget: int | None = None,
-                     with_tickets: bool = False, container=None):
+                     with_tickets: bool = False, force_all: bool = False,
+                     container=None):
     """Descarca date noi, aratand progresul pas cu pas.
 
     Intoarce raportul (`RefreshReport`) sau None daca a picat complet.
@@ -106,7 +107,8 @@ def run_data_refresh(*, quick: bool = True, with_players: bool = True,
         try:
             report = run_refresh(
                 quick=quick, with_players=with_players, api_budget=api_budget,
-                with_tickets=with_tickets, progress=progress,
+                with_tickets=with_tickets, force_all=force_all,
+                progress=progress,
             )
         except Exception as exc:  # noqa: BLE001
             status.update(label=f"{label} a eșuat", state="error")
@@ -129,14 +131,23 @@ def run_data_refresh(*, quick: bool = True, with_players: bool = True,
 
 
 def refresh_button(label: str = "Reîncarcă modelele") -> None:
-    """Butoanele din bara laterală, disponibile pe orice pagină."""
+    """Butoanele din bara laterală, disponibile pe orice pagină.
+
+    Butonul aduce TOT ce are nevoie modelul: rezultate, statistici, loturi,
+    absențe, cote și știri. Pașii scumpi se sar dacă au rulat de curând (vezi
+    `FRESH_HOURS`), deci prima apăsare a zilei durează minute, iar următoarele
+    câteva zeci de secunde. Fără gradul ăsta de prospețime, butonul ar fi
+    însemnat un sfert de oră de așteptare de fiecare dată.
+    """
     with st.sidebar:
         if st.button("⬇️ Actualizează datele", width="stretch",
                      type="primary",
-                     help="Aduce rezultatele noi, calendarul și statisticile "
-                          "oficiale LPF (~10 secunde). Pentru actualizarea "
-                          "completă, vezi pagina «Date și surse»."):
-            report = run_data_refresh(quick=True)
+                     help="Aduce tot ce e necesar: rezultate, scor live, "
+                          "statistici LPF, loturi și absențe, cote pre-meci, "
+                          "știri — apoi decontează biletele și reînvață "
+                          "calibrarea. Pașii scumpi se sar dacă sunt "
+                          "proaspeți, deci a doua apăsare e rapidă."):
+            report = run_data_refresh(quick=False)
             if report is not None:
                 st.rerun()
 

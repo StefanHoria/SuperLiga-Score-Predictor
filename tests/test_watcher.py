@@ -220,3 +220,69 @@ def test_grace_period_allows_checking_right_after_full_time(db):
                     status="scheduled")
     assert len(due_matches(db, now=NOW)) == 1
     assert MATCH_DURATION < timedelta(hours=2)
+
+
+# ----------------------------------------------------------------------
+# Prospețimea pașilor scumpi
+#
+# Butonul "Actualizează datele" aduce acum TOT. Ca să nu însemne un sfert de
+# oră de așteptare la fiecare apăsare, pașii scumpi se sar dacă au rulat de
+# curând: loturile nu se schimbă de două ori pe zi, iar cotele nu se mișcă în
+# cinci minute cât să merite încă șase minute de cereri.
+# ----------------------------------------------------------------------
+def _fresh_check(db, step, hours, *, force=False):
+    """Aceeași regulă ca `_is_fresh` din refresh."""
+    from datetime import datetime, timezone
+    from predictiescor.data.refresh import _last_success
+    if force:
+        return None
+    stamp = _last_success(db).get(step)
+    if not stamp:
+        return None
+    age = (datetime.now(timezone.utc)
+           - datetime.fromisoformat(stamp)).total_seconds() / 3600
+    return None if age >= hours else age
+
+
+def test_a_step_that_never_ran_is_not_fresh(db):
+    assert _fresh_check(db, "Cote pre-meci (Flashscore)", 3.0) is None
+
+
+def test_a_step_that_just_ran_is_fresh(db):
+    from predictiescor.data.refresh import _mark_success
+    _mark_success(db, "Cote pre-meci (Flashscore)")
+    assert _fresh_check(db, "Cote pre-meci (Flashscore)", 3.0) is not None
+
+
+def test_an_old_run_is_stale_again(db):
+    """După fereastră, pasul redevine de rulat."""
+    import json
+    from datetime import datetime, timedelta, timezone
+    old = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
+    with db.connect() as conn:
+        conn.execute("INSERT INTO meta(key, value) VALUES ('refresh_last_ok', ?)",
+                     (json.dumps({"Cote pre-meci (Flashscore)": old}),))
+    assert _fresh_check(db, "Cote pre-meci (Flashscore)", 3.0) is None
+
+
+def test_force_ignores_freshness(db):
+    from predictiescor.data.refresh import _mark_success
+    _mark_success(db, "Loturi și jucători")
+    assert _fresh_check(db, "Loturi și jucători", 12.0, force=True) is None
+
+
+def test_each_step_keeps_its_own_clock(db):
+    from predictiescor.data.refresh import _last_success, _mark_success
+    _mark_success(db, "Cote pre-meci (Flashscore)")
+    _mark_success(db, "Loturi și jucători")
+    done = _last_success(db)
+    assert set(done) == {"Cote pre-meci (Flashscore)", "Loturi și jucători"}
+    assert _fresh_check(db, "Statistici detaliate pe meci", 6.0) is None
+
+
+def test_corrupted_state_is_ignored_not_fatal(db):
+    from predictiescor.data.refresh import _last_success
+    with db.connect() as conn:
+        conn.execute("INSERT INTO meta(key, value)"
+                     " VALUES ('refresh_last_ok', 'nu e json')")
+    assert _last_success(db) == {}

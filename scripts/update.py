@@ -49,6 +49,9 @@ def parse_args() -> argparse.Namespace:
                    help="sare peste reimprospatarea loturilor")
     p.add_argument("--budget", type=int, default=None,
                    help="cereri API-Football permise (implicit: din config)")
+    p.add_argument("--force-all", action="store_true",
+                   help="reia si pasii proaspeti (ignora fereastra de "
+                        "prospetime)")
     p.add_argument("--with-tickets", action="store_true",
                    help="genereaza biletele pentru urmatoarea zi cu meciuri")
     p.add_argument("--quiet", action="store_true")
@@ -143,6 +146,7 @@ def main() -> int:
         with_players=not args.no_players,
         api_budget=args.budget,
         with_tickets=args.with_tickets,
+        force_all=args.force_all,
         progress=show,
     )
 

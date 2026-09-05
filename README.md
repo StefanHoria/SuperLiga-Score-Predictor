@@ -262,19 +262,30 @@ Două limite, ambele respectate automat de cod:
 
 ### Din interfață (butonul)
 
-**Bara laterală, pe orice pagină** → `⬇️ Actualizează datele` face o
-actualizare rapidă (~10 secunde): rezultatele noi, calendarul și statisticile
-oficiale LPF. Nu consumă cota API.
+**⬇️ Actualizează datele**, din bara laterală, pe orice pagină. Aduce **tot ce
+are nevoie modelul**, în unsprezece pași: rezultate, scor live, calendar,
+statistici oficiale LPF, știri, cote pre-meci, loturi și absențe, statistici
+detaliate pe meci — apoi curăță, înregistrează predicțiile și decontează
+biletele.
 
-**Pagina *Date și surse*** are ambele variante, cu progres pas cu pas:
+**Pașii scumpi se sar dacă sunt proaspeți.** Altfel butonul ar fi însemnat un
+sfert de oră de așteptare la fiecare apăsare, degeaba: loturile nu se schimbă
+de două ori pe zi, iar cotele nu se mișcă în cinci minute cât să merite încă
+șase minute de cereri.
 
-| Buton | Ce face | Durată |
-|---|---|---|
-| **Actualizare rapidă** | rezultate + calendar + statistici LPF | ~10 s |
-| **Actualizare completă** | în plus loturi și statistici pe meci; poți alege bugetul de cereri și dacă se generează biletele zilei | minute |
+| Pas | Rămâne proaspăt |
+|---|---|
+| Cote pre-meci (Flashscore) | 3 ore |
+| Statistici detaliate pe meci | 6 ore |
+| Loturi și jucători | 12 ore |
 
-Al doilea buton din bara laterală, `Reîncarcă modelele`, doar reantrenează pe
-datele existente — nu descarcă nimic.
+Restul rulează mereu — durează secunde și aduc exact ce se schimbă des.
+
+Măsurat pe 6 septembrie 2026: **prima rulare 278 secunde**, a doua imediat
+după, **96 de secunde**, cu cei trei pași scumpi săriți.
+
+Din terminal, `python scripts/update.py --force-all` ignoră fereastra de
+prospețime și reia tot.
 
 ### Din terminal
 
