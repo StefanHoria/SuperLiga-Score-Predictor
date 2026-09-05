@@ -175,13 +175,29 @@ class PredictionPipeline:
                     self.warnings.append(
                         f"Modelul de jucatori indisponibil: {exc}")
 
-        # accidentatii si suspendatii ies din predictii
+        # Ies din predictii doua categorii, pe acelasi mecanism:
+        #   * accidentatii si suspendatii - lipsesc de la meciul urmator;
+        #   * cei PLECATI din club - nu mai joaca acolo deloc.
+        #
+        # A doua lipsea, si se vedea: modelul propunea in continuare marcatori
+        # care se transferasera de luni de zile, fiindca el isi ia lotul din
+        # aparitiile istorice, iar acolo chiar jucasera pentru echipa.
         if self.players is not None and self.players.fitted:
             try:
                 absent = self.db.unavailable_players()
-                if absent:
-                    self.players.set_unavailable(absent)
-                    log.info("%d jucatori indisponibili exclusi", len(absent))
+                plecati = self.db.departed_players()
+                # Transfermarkt isi actualizeaza loturile cu intarziere. Cand
+                # presa afirma o plecare ca fapt, o credem: costul unei
+                # excluderi gresite e mic, iar al unei predictii pe un jucator
+                # care nu mai e la club e vizibil si jenant.
+                raportati = self.db.reported_departures()
+                nume_raportate = set(raportati["player_name"])                     if not raportati.empty else set()
+                if absent or plecati or nume_raportate:
+                    self.players.set_unavailable(
+                        absent | plecati | nume_raportate)
+                    log.info("exclusi din predictii: %d indisponibili, "
+                             "%d fara club, %d dati plecati de presa",
+                             len(absent), len(plecati), len(nume_raportate))
             except Exception as exc:  # noqa: BLE001
                 self.warnings.append(f"Lista de absenti indisponibila: {exc}")
 

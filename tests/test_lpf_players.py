@@ -166,3 +166,156 @@ def test_own_goal_not_credited_to_scorer(soup):
 ])
 def test_name_normalisation(raw, expected):
     assert normalize_player_name(raw) == expected
+
+
+# ----------------------------------------------------------------------
+# Jucătorii plecați
+#
+# `upsert_player` mută un jucător când îl găsește la alt club DIN LIGĂ, dar cei
+# plecați în străinătate nu mai apar nicăieri — rămâneau agățați de fostul club
+# pentru totdeauna. Bîrligea și Tănase erau tot la FCSB, deși plecaseră.
+# ----------------------------------------------------------------------
+import sys as _sys
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "src"))
+
+import pytest as _pytest
+
+from predictiescor.storage.db import Database as _Database
+
+
+@_pytest.fixture
+def squad(tmp_path):
+    db = _Database(tmp_path / "lot.db")
+    team = db.upsert_team("FCSB", source="test")
+    ids = {name: db.upsert_player(name, team, source="test", ext_id=name)
+           for name in ("Ion Pop", "Vasile Ene", "Daniel Bîrligea")}
+    return db, team, ids
+
+
+def test_a_player_missing_from_the_squad_is_detached(squad):
+    db, team, ids = squad
+    gone = db.detach_missing_players(team, [ids["Ion Pop"], ids["Vasile Ene"]])
+    assert gone == 1
+
+    with db.connect() as conn:
+        row = conn.execute("SELECT team_id FROM players WHERE player_id = ?",
+                           (ids["Daniel Bîrligea"],)).fetchone()
+    assert row["team_id"] is None
+
+
+def test_the_player_is_not_deleted(squad):
+    """Istoricul lui rămâne — și e corect să rămână."""
+    db, team, ids = squad
+    db.detach_missing_players(team, [ids["Ion Pop"]])
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) c FROM players").fetchone()["c"] == 3
+
+
+def test_an_empty_roster_detaches_nobody(squad):
+    """Dacă pagina n-a putut fi citită, nu golim lotul din greșeală."""
+    db, team, _ = squad
+    assert db.detach_missing_players(team, []) == 0
+    with db.connect() as conn:
+        left = conn.execute("SELECT COUNT(*) c FROM players"
+                            " WHERE team_id IS NOT NULL").fetchone()["c"]
+    assert left == 3
+
+
+def test_other_teams_are_untouched(squad):
+    db, team, ids = squad
+    other = db.upsert_team("CFR Cluj", source="test")
+    outsider = db.upsert_player("Radu Marin", other, source="test", ext_id="rm")
+    db.detach_missing_players(team, [ids["Ion Pop"]])
+    with db.connect() as conn:
+        row = conn.execute("SELECT team_id FROM players WHERE player_id = ?",
+                           (outsider,)).fetchone()
+    assert row["team_id"] == other
+
+
+def test_departed_players_are_those_with_history_but_no_club(squad):
+    """Doar cine chiar a jucat conteaza - restul sunt intrari fara urma."""
+    db, team, ids = squad
+    match_id = db.upsert_match(season=2026, utc_date="2026-08-01T18:00:00+00:00",
+                               home="FCSB", away="UTA Arad", home_goals=1,
+                               away_goals=0, status="finished")
+    db.upsert_player_stats(match_id, ids["Daniel Bîrligea"], team,
+                           {"minutes": 90, "goals": 1})
+    db.detach_missing_players(team, [ids["Ion Pop"]])
+
+    plecati = db.departed_players()
+    assert "Daniel Bîrligea" in plecati
+    assert "Vasile Ene" not in plecati, "detașat, dar fără nicio apariție"
+
+
+# ----------------------------------------------------------------------
+# Presa vs. lotul de la Transfermarkt
+#
+# Transfermarkt isi actualizeaza loturile cu intarziere: Tanase aparea acolo si
+# dupa ce trei publicatii scrisesera ca a semnat cu Omonia. Presa e mai rapida,
+# dar mai putin sigura - de aceea cerem "confirmat", nu zvon.
+# ----------------------------------------------------------------------
+def _news_departure(db, player_id, source, certainty="confirmat"):
+    article = db.upsert_news_article(
+        url=f"https://{source}/{player_id}-{certainty}", source=source,
+        title="A plecat", published_at="2026-09-05T12:00:00+00:00")
+    db.save_news_facts(article, [{
+        "kind": "transfer_plecare", "certainty": certainty,
+        "player_name": "Daniel Bîrligea", "player_id": player_id,
+        "evidence": "a plecat de la FCSB"}])
+
+
+def test_a_confirmed_departure_is_surfaced(tmp_path):
+    db = _Database(tmp_path / "plecari.db")
+    team = db.upsert_team("FCSB", source="test")
+    pid = db.upsert_player("Daniel Bîrligea", team, source="test")
+    _news_departure(db, pid, "fanatik.ro")
+
+    out = db.reported_departures()
+    assert list(out["player_name"]) == ["Daniel Bîrligea"]
+    assert int(out.iloc[0]["surse"]) == 1
+
+
+def test_a_rumour_is_not_enough(tmp_path):
+    db = _Database(tmp_path / "zvon.db")
+    team = db.upsert_team("FCSB", source="test")
+    pid = db.upsert_player("Daniel Bîrligea", team, source="test")
+    _news_departure(db, pid, "fanatik.ro", certainty="zvon")
+    assert db.reported_departures().empty
+
+
+def test_sources_are_counted_not_articles(tmp_path):
+    """Doua articole de la aceeasi publicatie raman o singura sursa."""
+    db = _Database(tmp_path / "surse.db")
+    team = db.upsert_team("FCSB", source="test")
+    pid = db.upsert_player("Daniel Bîrligea", team, source="test")
+    for i in range(3):
+        article = db.upsert_news_article(
+            url=f"https://fanatik.ro/{i}", source="fanatik.ro",
+            title="A plecat", published_at="2026-09-05T12:00:00+00:00")
+        db.save_news_facts(article, [{
+            "kind": "transfer_plecare", "certainty": "confirmat",
+            "player_name": "Daniel Bîrligea", "player_id": pid,
+            "evidence": "a plecat"}])
+    assert int(db.reported_departures().iloc[0]["surse"]) == 1
+
+
+def test_a_player_already_out_of_the_squad_is_not_repeated(tmp_path):
+    """Daca Transfermarkt l-a scos deja, nu mai e un conflict."""
+    db = _Database(tmp_path / "scos.db")
+    team = db.upsert_team("FCSB", source="test")
+    pid = db.upsert_player("Daniel Bîrligea", team, source="test")
+    _news_departure(db, pid, "fanatik.ro")
+    db.detach_missing_players(team, [db.upsert_player("Altul", team,
+                                                      source="test")])
+    assert db.reported_departures().empty
+
+
+def test_the_threshold_of_sources_can_be_raised(tmp_path):
+    db = _Database(tmp_path / "prag.db")
+    team = db.upsert_team("FCSB", source="test")
+    pid = db.upsert_player("Daniel Bîrligea", team, source="test")
+    _news_departure(db, pid, "fanatik.ro")
+    assert db.reported_departures(min_sources=1).shape[0] == 1
+    assert db.reported_departures(min_sources=2).empty

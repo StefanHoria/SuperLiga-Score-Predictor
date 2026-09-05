@@ -299,8 +299,8 @@ def run_refresh(
             for name, club_id, slug in clubs:
                 team_id = db.upsert_team(name, source=provider.name,
                                          ext_id=club_id)
-                written += provider.fetch_club_players(club_id, slug, season,
-                                                       team_id)
+                written += provider.fetch_club_players(
+                    club_id, slug, season, team_id, fresh=True)
                 # Absentele nu se aduceau deloc din refresh - se actualizau doar
                 # la ingestia completa a sezonului, deci ramaneau vechi.
                 try:

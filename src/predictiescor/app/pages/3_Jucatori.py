@@ -5,7 +5,8 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from common import (
+from common import (  # noqa: F401
+    local_series,
     data_version, load_pipeline, load_player_season_stats, refresh_button,
     season_label, setup_page, sidebar_footer,
 )
@@ -124,7 +125,37 @@ with tab_team:
 with tab_absent:
     from predictiescor.storage.db import Database
 
-    absences = Database().availability_df()
+    _db = Database()
+
+    # Transfermarkt actualizează loturile cu întârziere: Tănase apare acolo și
+    # după ce trei publicații au scris că a semnat cu Omonia. Presa e mai
+    # rapidă, dar mai puțin sigură — de aceea arătăm din câte surse vine.
+    plecati = _db.reported_departures()
+    if not plecati.empty:
+        st.warning(
+            f"**{len(plecati)} jucători sunt dați plecați de presă, dar apar "
+            f"încă în lot la Transfermarkt.** Îi excludem din predicții — "
+            f"costul unei excluderi greșite e mic, al unei predicții pe cineva "
+            f"care nu mai e la club e vizibil.")
+        plecati = plecati.assign(
+            ultima=lambda f: local_series(f["ultima"], "%d.%m.%Y %H:%M"))
+        arata = plecati.rename(columns={
+            "player_name": "jucător", "echipa": "încă listat la",
+            "ultima": "ultima știre", "dovada": "din articol"})
+        st.dataframe(
+            arata[["jucător", "încă listat la", "surse", "ultima știre",
+                   "din articol"]],
+            hide_index=True, width="stretch",
+            column_config={"din articol": st.column_config.TextColumn(
+                width="large")})
+        st.caption(
+            "Verifică-le: dacă vreunul e greșit, faptul vine dintr-un articol "
+            "care afirma plecarea ca sigură. Pagina **Știri** arată propoziția "
+            "exactă și linkul."
+        )
+        st.divider()
+
+    absences = _db.availability_df()
     if absences.empty:
         st.info("Nu există date despre accidentări sau suspendări.")
         st.code("python scripts/update.py", language="bash")

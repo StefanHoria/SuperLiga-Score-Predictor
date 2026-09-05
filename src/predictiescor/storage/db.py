@@ -832,6 +832,72 @@ class Database:
             )
         return len(rows)
 
+    def departed_players(self) -> set[str]:
+        """Jucatorii care au aparut in meciuri, dar nu mai sunt in niciun lot.
+
+        Sunt cei plecati din liga. Raman in baza cu tot istoricul lor - si e
+        corect sa ramana - dar nu mai au ce cauta in predictii pentru fostul
+        club.
+        """
+        sql = """
+            SELECT DISTINCT p.name FROM players p
+            WHERE p.team_id IS NULL
+              AND EXISTS (SELECT 1 FROM player_match_stats s
+                           WHERE s.player_id = p.player_id)
+        """
+        with self.connect() as conn:
+            return {str(r["name"]) for r in conn.execute(sql) if r["name"]}
+
+    def reported_departures(self, *, min_sources: int = 1) -> pd.DataFrame:
+        """Jucatori dati plecati de presa, dar inca in lot la Transfermarkt.
+
+        Transfermarkt isi actualizeaza loturile cu intarziere - Tanase apare
+        acolo si dupa ce trei publicatii au scris ca a semnat cu Omonia. Presa
+        e mai rapida, dar mai putin sigura; de aceea cerem ca articolul sa
+        afirme plecarea ca fapt ("confirmat"), nu ca zvon, si aratam din cate
+        surse vine.
+        """
+        sql = """
+            SELECT f.player_id, f.player_name, t.name AS echipa,
+                   COUNT(DISTINCT a.source) AS surse,
+                   MAX(a.published_at) AS ultima,
+                   MIN(f.evidence) AS dovada
+            FROM news_facts f
+            JOIN news_articles a ON a.article_id = f.article_id
+            JOIN players p ON p.player_id = f.player_id
+            JOIN teams t ON t.team_id = p.team_id
+            WHERE f.kind = 'transfer_plecare' AND f.certainty = 'confirmat'
+              AND p.team_id IS NOT NULL
+            GROUP BY f.player_id, f.player_name, t.name
+            HAVING surse >= ?
+            ORDER BY surse DESC, ultima DESC
+        """
+        with self.connect() as conn:
+            return pd.read_sql_query(sql, conn, params=[int(min_sources)])
+
+    def detach_missing_players(self, team_id: int,
+                               still_here: Iterable[int]) -> int:
+        """Scoate din lot jucatorii care nu mai apar in el.
+
+        NU sterge jucatorul: aparitiile lui din meciurile trecute raman, si e
+        corect sa ramana. Doar legatura cu echipa curenta dispare (`team_id`
+        devine NULL), ca sa nu mai fie propus in predictii pentru un club la
+        care nu mai joaca.
+        """
+        keep = [int(p) for p in still_here]
+        if not keep:
+            return 0
+        marks = ",".join("?" * len(keep))
+        with self.connect() as conn:
+            cursor = conn.execute(
+                f"UPDATE players SET team_id = NULL"
+                f" WHERE team_id = ? AND player_id NOT IN ({marks})",
+                [int(team_id), *keep])
+            gone = cursor.rowcount or 0
+        if gone:
+            log.info("au plecat de la echipa %s: %d jucatori", team_id, gone)
+        return gone
+
     def availability_df(self) -> pd.DataFrame:
         sql = """
             SELECT a.*, p.name AS player, t.name AS team

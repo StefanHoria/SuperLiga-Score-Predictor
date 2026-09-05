@@ -167,20 +167,26 @@ class TransfermarktProvider(DataProvider):
 
     # ------------------------------------------------------------------
     def fetch_club_players(self, club_id: str, slug: str, season: int,
-                           team_id: int) -> int:
+                           team_id: int, *, fresh: bool = False) -> int:
         """Statisticile sezoniere ale jucatorilor unui club. Intoarce nr. de randuri."""
         # `reldata` filtreaza la competitia interna (fara cupe / Europa).
         # Valoarea contine un "&" codificat ca %26; il punem direct in URL,
         # altfel `requests` ar re-encoda semnul procent in %2526.
         url = (f"{BASE}/{slug}/leistungsdaten/verein/{club_id}/plus/1"
                f"?reldata={COMPETITION}%26{season}")
-        html = self.http.get_text(url, ttl_hours=24)
+        # `fresh` ocoleste cache-ul. Conteaza: pasul de loturi ruleaza oricum
+        # cel mult o data la 12 ore, iar cu pagina tinuta 24 de ore un transfer
+        # de azi s-ar fi vazut abia maine. Asa s-a intamplat cu Birligea si
+        # Tanase: Transfermarkt nu-i mai lista, dar noi citeam pagina veche.
+        html = self.http.get_text(url, ttl_hours=0 if fresh else 24,
+                                  use_cache=not fresh)
         soup = BeautifulSoup(html, "lxml")
         table = soup.select_one("table.items")
         if table is None:
             log.warning("[%s] tabel lipsa pentru clubul %s", self.name, slug)
             return 0
 
+        seen_players: set[int] = set()
         written = 0
         for tr in table.select("tbody > tr"):
             tds = tr.select("td")
@@ -221,6 +227,16 @@ class TransfermarktProvider(DataProvider):
                 age=age,
             )
             written += 1
+            seen_players.add(player_id)
+
+        # Cine era la echipa dar nu mai e in lot a PLECAT.
+        #
+        # Fara pasul asta lotul creste la nesfarsit: `upsert_player` muta un
+        # jucator cand il gaseste la alt club DIN LIGA, dar cei plecati in
+        # strainatate nu mai apar nicaieri, deci ramaneau agatati de fostul club
+        # pentru totdeauna. Bîrligea si Tanase erau tot la FCSB, desi plecasera.
+        if seen_players:
+            self.db.detach_missing_players(team_id, seen_players)
         return written
 
     @classmethod

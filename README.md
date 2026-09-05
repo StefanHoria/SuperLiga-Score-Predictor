@@ -993,6 +993,43 @@ nu are încă pe ce să se sprijine.
 
 ---
 
+## Când sursele nu sunt de acord
+
+Transfermarkt își actualizează loturile cu întârziere. Pe 6 septembrie 2026,
+**Florin Tănase apărea încă în lotul FCSB** — deși trei publicații scriseseră,
+cu o săptămână înainte, că a semnat cu Omonia Nicosia. La fel Daniel Bîrligea.
+
+Nu e o eroare de citire: pagina de club chiar îi listează. Datele reflectă
+fidel sursa; sursa e în urmă.
+
+Aici își câștigă locul fluxurile de știri. `reported_departures()` compară cele
+două surse și scoate conflictele — jucători dați plecați de presă, dar încă în
+lot:
+
+| Jucător | Încă listat la | Surse |
+|---|---|---|
+| Florin Tănase | FCSB | 3 |
+| Anzor Mekvabishvili | Universitatea Craiova | 2 |
+| Daniel Bîrligea | FCSB | 1 |
+
+**Îi excludem din predicții** când articolul afirmă plecarea ca fapt
+(`confirmat`), nu ca zvon. Judecata din spate: costul unei excluderi greșite e
+mic — un jucător în plus care nu apare în lista de marcatori. Costul unei
+predicții pe cineva care nu mai e la club e vizibil și jenant.
+
+Conflictele se văd pe pagina **Jucători → Absenți**, cu propoziția din articol,
+ca să le poți verifica. Nu ascundem dezacordul, îl arătăm.
+
+### Și cine chiar a plecat din ligă
+
+Separat: `upsert_player` muta un jucător când îl găsea la alt club **din ligă**,
+dar cei plecați în străinătate nu mai apăreau nicăieri — rămâneau agățați de
+fostul club pentru totdeauna. Acum, după fiecare citire a unui lot, cine nu mai
+e în el se detașează (`team_id` devine NULL). Jucătorul **nu** se șterge:
+aparițiile lui din meciurile trecute rămân, și e corect să rămână.
+
+---
+
 ## Absențele: le colectăm, dar modelul nu le vede (încă)
 
 Comentariul din schemă spune problema: *„Fără asta, modelul presupune că tot
