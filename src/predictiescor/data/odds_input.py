@@ -185,6 +185,28 @@ def line_movement(db: Database, *, min_move: float = 0.08,
                   "opening", "price", "mutare", "sens"]]
 
 
+def moved_matches(db: Database, *, min_move: float = 0.05) -> dict[int, float]:
+    """Meciurile pe care piata s-a mutat mult, cu marimea celei mai mari mutari.
+
+    Intoarce `{match_id: mutare}`. Serveste la avertizarea pe bilete: daca un
+    pont sta pe un meci unde cota s-a schimbat serios, modelul lucreaza cu
+    informatie mai veche decat piata.
+    """
+    sql = """
+        SELECT o.match_id, o.opening, o.price
+        FROM odds o JOIN matches m ON m.match_id = o.match_id
+        WHERE o.opening IS NOT NULL AND o.opening > 1.0 AND o.price > 1.0
+          AND m.home_goals IS NULL AND o.bookmaker NOT LIKE 'fs_%'
+    """
+    with db.connect() as conn:
+        frame = pd.read_sql_query(sql, conn)
+    if frame.empty:
+        return {}
+    frame["mutare"] = (1.0 / frame["price"] - 1.0 / frame["opening"]).abs()
+    biggest = frame.groupby("match_id")["mutare"].max()
+    return {int(k): float(v) for k, v in biggest.items() if v >= min_move}
+
+
 def automatic_odds(db: Database) -> dict[str, Any]:
     """Ce cote avem aduse automat pentru meciurile care urmeaza.
 

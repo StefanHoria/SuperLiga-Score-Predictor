@@ -470,3 +470,71 @@ def test_the_hour_is_never_the_raw_utc_slice():
     kickoff = "2026-09-06T17:30:00+00:00"
     frame = _ticket([_leg_at(kickoff)]).to_frame()
     assert frame["ora"].iloc[0] != kickoff[11:16]
+
+
+# ----------------------------------------------------------------------
+# Calibrarea pe strategie
+#
+# Fara coloana de "cat de neobisnuit", tabelul impinge spre concluzia gresita:
+# "Bilet cu cota mare" iese 0% din 16 si pare stricat, desi la o sansa prezisa
+# de 14% pe bilet e ghinion obisnuit.
+# ----------------------------------------------------------------------
+def _tickets_with(db, strategy, label, probability, wins, losses):
+    with db.connect() as conn:
+        for i in range(wins + losses):
+            conn.execute(
+                "INSERT INTO tickets(created_at, match_day, strategy, label,"
+                " stake, legs_total, status, probability)"
+                " VALUES ('2026-09-01','2026-09-01',?,?,10,3,?,?)",
+                (strategy, label,
+                 "castigat" if i < wins else "pierdut", probability))
+
+
+def test_a_long_shot_losing_every_time_is_not_flagged(tmp_path):
+    """0 din 16 la o șansă de 14% pe bilet: ghinion, nu defect."""
+    from predictiescor.storage.db import Database
+    from predictiescor.tickets import strategy_calibration
+    db = Database(tmp_path / "cota.db")
+    _tickets_with(db, "cota_mare", "Bilet cu cotă mare", 0.14, wins=0, losses=16)
+
+    row = strategy_calibration(db).iloc[0]
+    assert row["real"] == 0.0
+    assert row["neobișnuit"] > 0.05, "nu trebuie semnalat ca anormal"
+
+
+def test_a_confident_strategy_that_always_loses_is_flagged(tmp_path):
+    """0 din 16 la o șansă de 80%: aici chiar e ceva stricat."""
+    from predictiescor.storage.db import Database
+    from predictiescor.tickets import strategy_calibration
+    db = Database(tmp_path / "sigur.db")
+    _tickets_with(db, "sigur", "Bilet sigur", 0.80, wins=0, losses=16)
+
+    row = strategy_calibration(db).iloc[0]
+    assert row["neobișnuit"] < 0.01
+
+
+def test_a_well_calibrated_strategy_looks_normal(tmp_path):
+    from predictiescor.storage.db import Database
+    from predictiescor.tickets import strategy_calibration
+    db = Database(tmp_path / "bun.db")
+    _tickets_with(db, "echilibrat", "Bilet echilibrat", 0.50, wins=10, losses=10)
+
+    row = strategy_calibration(db).iloc[0]
+    assert row["neobișnuit"] > 0.5
+
+
+def test_expected_wins_are_reported(tmp_path):
+    from predictiescor.storage.db import Database
+    from predictiescor.tickets import strategy_calibration
+    db = Database(tmp_path / "asteptate.db")
+    _tickets_with(db, "goluri", "Bilet pe goluri", 0.60, wins=8, losses=2)
+
+    row = strategy_calibration(db).iloc[0]
+    assert row["așteptate"] == pytest.approx(6.0)
+    assert int(row["castigate"]) == 8
+
+
+def test_no_settled_tickets_gives_an_empty_table(tmp_path):
+    from predictiescor.storage.db import Database
+    from predictiescor.tickets import strategy_calibration
+    assert strategy_calibration(Database(tmp_path / "gol.db")).empty

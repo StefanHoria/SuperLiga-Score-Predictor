@@ -18,6 +18,8 @@ zece bilete norocoase ar rasuci modelul complet.
 """
 from __future__ import annotations
 
+import math
+
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -196,6 +198,46 @@ def update_strategy_weights(db) -> pd.DataFrame:
     frame = pd.DataFrame(rows).sort_values("roi", ascending=False)
     log.info("greutati actualizate pentru %d strategii", len(frame))
     return frame
+
+
+def strategy_calibration(db) -> pd.DataFrame:
+    """Cat de bine isi cunoaste fiecare strategie sansele.
+
+    Coloana care conteaza e ultima. O strategie de "cota mare" iese 0% din 16
+    bilete si pare stricata - dar daca modelul zice 14% de bilet, sansa sa nu
+    iasa niciunul e 8%, adica ghinion obisnuit. Fara ea, tabelul te impinge
+    exact spre concluzia gresita.
+    """
+    with db.connect() as conn:
+        frame = pd.read_sql_query(
+            "SELECT strategy, label, probability, status FROM tickets"
+            " WHERE status IN ('castigat', 'pierdut')", conn)
+    if frame.empty:
+        return frame
+
+    frame["castigat"] = frame["status"] == "castigat"
+    grouped = frame.groupby(["strategy", "label"]).agg(
+        bilete=("castigat", "size"),
+        prezis=("probability", "mean"),
+        castigate=("castigat", "sum"),
+    ).reset_index()
+    grouped["real"] = grouped["castigate"] / grouped["bilete"]
+    grouped["așteptate"] = (grouped["prezis"] * grouped["bilete"]).round(1)
+    grouped["diferență"] = grouped["real"] - grouped["prezis"]
+
+    # Cat de neobisnuit ar fi rezultatul, daca modelul ar avea dreptate.
+    # Testul binomial in doua cozi, calculat direct - nu merita o dependenta.
+    def _surprise(row) -> float:
+        n, k, p = int(row["bilete"]), int(row["castigate"]), float(row["prezis"])
+        if n == 0 or not 0.0 < p < 1.0:
+            return 1.0
+        probs = [math.comb(n, i) * p ** i * (1 - p) ** (n - i)
+                 for i in range(n + 1)]
+        target = probs[k]
+        return float(min(1.0, sum(x for x in probs if x <= target * 1.0000001)))
+
+    grouped["neobișnuit"] = grouped.apply(_surprise, axis=1)
+    return grouped.sort_values("bilete", ascending=False)
 
 
 def strategy_performance(db) -> pd.DataFrame:

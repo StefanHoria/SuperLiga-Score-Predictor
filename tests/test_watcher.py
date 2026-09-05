@@ -286,3 +286,50 @@ def test_corrupted_state_is_ignored_not_fatal(db):
         conn.execute("INSERT INTO meta(key, value)"
                      " VALUES ('refresh_last_ok', 'nu e json')")
     assert _last_success(db) == {}
+
+
+# ----------------------------------------------------------------------
+# Știrile au ritmul lor
+#
+# Ciclul nu ajungea la fluxuri decât când lipsea un rezultat — și nici atunci
+# mereu, fiindcă Flashscore îl aduce de obicei pe calea rapidă. O accidentare
+# anunțată la prânz nu intra în bază decât dacă apăsai butonul.
+# ----------------------------------------------------------------------
+def test_news_are_read_even_with_no_match_to_check(db, monkeypatch):
+    from predictiescor.tickets import watcher
+
+    called = []
+    monkeypatch.setattr(watcher, "_refresh_news",
+                        lambda database, cfg, *, now, force=False:
+                        called.append(now) or 7)
+
+    result = watcher.run_cycle(db, now=NOW)
+    assert result.due == []
+    assert result.news == 7
+    assert len(called) == 1
+    assert "presă" in result.message
+
+
+def test_news_count_as_work_done(db, monkeypatch):
+    from predictiescor.tickets import watcher
+    monkeypatch.setattr(watcher, "_refresh_news",
+                        lambda database, cfg, *, now, force=False: 3)
+    assert watcher.run_cycle(db, now=NOW).did_work is True
+
+
+def test_a_quiet_cycle_is_still_quiet(db, monkeypatch):
+    from predictiescor.tickets import watcher
+    monkeypatch.setattr(watcher, "_refresh_news",
+                        lambda database, cfg, *, now, force=False: 0)
+    assert watcher.run_cycle(db, now=NOW).did_work is False
+
+
+def test_the_feeds_are_not_read_twice_within_the_hour(db):
+    """Ciclul rulează din 15 în 15 minute; fluxurile, cel mult o dată pe oră."""
+    from datetime import timedelta
+    from predictiescor.tickets.watcher import NEWS_EVERY, NEWS_KEY, _read_meta, _write_meta
+
+    _write_meta(db, NEWS_KEY, NOW.isoformat())
+    recent = datetime.fromisoformat(_read_meta(db, NEWS_KEY))
+    assert (NOW + timedelta(minutes=20)) - recent < NEWS_EVERY
+    assert (NOW + timedelta(hours=2)) - recent > NEWS_EVERY

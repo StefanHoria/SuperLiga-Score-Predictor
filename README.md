@@ -382,6 +382,12 @@ Două reguli țin biletele oneste:
 python scripts/watch.py --install
 ```
 
+La fiecare ciclu citește și **fluxurile de știri, cel mult o dată pe oră** —
+independent de meciuri. Fără asta, o accidentare anunțată la prânz, în ziua
+meciului de seară, nu intra în bază decât dacă apăsai butonul: ciclul ajungea
+la fluxuri doar când lipsea un rezultat, și nici atunci mereu, fiindcă
+Flashscore îl aduce de obicei pe calea rapidă.
+
 Înregistrează o sarcină Windows care rulează din 15 în 15 minute, **fără
 fereastră de consolă** (`pythonw.exe`; jurnalul ajunge în `data/watch.log`). Nu
 face nicio cerere de rețea decât dacă **chiar s-a încheiat un meci** între timp:
@@ -436,6 +442,28 @@ Din rezultate se învață două lucruri:
 * **Greutatea strategiilor.** Strategiile profitabile sunt propuse mai des.
   Greutatea se schimbă doar după minim 8 bilete, cu shrinkage — ca un noroc
   de moment să nu răstoarne concluzia.
+
+### Își cunoaște fiecare strategie șansele?
+
+O rată de reușită singură induce în eroare. „Bilet cu cotă mare" iese **0 % din
+16** și pare stricat — dar la o șansă prezisă de 14 % pe bilet, șansa să nu iasă
+niciunul e **15 %**: ghinion obișnuit, nu defect.
+
+De aceea tabelul are o coloană de *cât de neobișnuit* ar fi rezultatul dacă
+modelul ar avea dreptate (test binomial în două cozi). Măsurat pe 6 septembrie
+2026, **nicio strategie nu deviază neobișnuit** — toate peste 15 %.
+
+Diferența față de piețe: la nivel de **pont**, marcatorii chiar deviază
+semnificativ (46,9 % preziși vs 14,3 % reali, 3 abateri standard). La nivel de
+**bilet** nu se vede, fiindcă 9 bilete sunt prea puține și combinarea ponturilor
+diluează semnalul. Piețele sunt măsurătoarea mai ascuțită.
+
+### Avertisment când s-a mutat piața
+
+Dacă un pont stă pe un meci unde cota s-a schimbat mult de la deschidere,
+biletul primește un semn. Nu schimbă predicția — spune doar că **modelul
+lucrează cu informație mai veche decât casele**. E singurul semnal din
+aplicație care vine din ceva ce modelul nu are.
 
 ### Istoric onest
 

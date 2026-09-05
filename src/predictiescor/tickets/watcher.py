@@ -37,6 +37,15 @@ RETRY_AFTER = timedelta(minutes=20)
 #: cheia sub care tinem minte ultima verificare
 LAST_CHECK_KEY = "watch_last_check"
 
+#: Stirile au ritmul lor, independent de meciuri.
+#:
+#: Ciclul de verificare a biletelor nu ajunge la fluxuri decat cand lipseste un
+#: rezultat - si nici atunci intotdeauna, fiindca Flashscore il aduce de obicei
+#: pe calea rapida. In practica insemna ca o accidentare anuntata la pranz, in
+#: ziua meciului de seara, nu intra in baza decat daca apasai butonul.
+NEWS_KEY = "watch_last_news"
+NEWS_EVERY = timedelta(hours=1)
+
 
 @dataclass
 class WatchResult:
@@ -48,11 +57,12 @@ class WatchResult:
     settled: int = 0
     still_open: int = 0
     newly_finished: int = 0
+    news: int = 0
     message: str = ""
 
     @property
     def did_work(self) -> bool:
-        return self.refreshed or self.settled > 0
+        return self.refreshed or self.settled > 0 or self.news > 0
 
     def describe(self) -> str:
         if not self.due:
@@ -67,6 +77,8 @@ class WatchResult:
             parts.append(f"{self.settled} bilete decontate")
         if self.still_open:
             parts.append(f"{self.still_open} raman deschise")
+        if self.news:
+            parts.append(f"{self.news} fapte noi din presa")
         return " | ".join(parts)
 
 
@@ -145,10 +157,15 @@ def run_cycle(db: Database | None = None, cfg: Config | None = None,
     now = now or datetime.now(timezone.utc)
     result = WatchResult(checked_at=now)
 
+    # Stirile intai: sunt ieftine (patru cereri) si nu depind de meciuri.
+    result.news = _refresh_news(db, cfg, now=now, force=force)
+
     result.due = due_matches(db, now=now)
     if not result.due:
         _write_meta(db, LAST_CHECK_KEY, now.isoformat(timespec="seconds"))
-        result.message = "niciun meci de verificat"
+        result.message = ("niciun meci de verificat"
+                          + (f"; {result.news} fapte noi din presă"
+                             if result.news else ""))
         return result
 
     # Daca toate meciurile au deja rezultat, e de ajuns sa decontam: nu mai
@@ -207,6 +224,36 @@ def run_cycle(db: Database | None = None, cfg: Config | None = None,
 
     _write_meta(db, LAST_CHECK_KEY, now.isoformat(timespec="seconds"))
     return result
+
+
+def _refresh_news(db: Database, cfg: Config, *, now: datetime,
+                  force: bool = False) -> int:
+    """Citeste fluxurile de stiri, cel mult o data pe ora.
+
+    Ruleaza independent de meciuri: o accidentare se anunta cand se anunta, nu
+    dupa fluierul final. Patru cereri HTTP, cateva secunde.
+    """
+    if not force:
+        last = _read_meta(db, NEWS_KEY)
+        if last:
+            try:
+                if now - datetime.fromisoformat(last) < NEWS_EVERY:
+                    return 0
+            except ValueError:
+                pass
+
+    from ..data.news import NewsProvider
+
+    provider = NewsProvider(db=db, cfg=cfg)
+    if not provider.available:
+        return 0
+    try:
+        result = provider.refresh()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("stirile nu s-au putut citi: %s", exc)
+        return 0
+    _write_meta(db, NEWS_KEY, now.isoformat(timespec="seconds"))
+    return int(result.player_stats)
 
 
 def _flashscore_pass(db: Database, cfg: Config) -> int:

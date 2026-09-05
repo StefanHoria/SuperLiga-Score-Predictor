@@ -17,13 +17,14 @@ from predictiescor.tickets import (
     STRATEGIES, TicketGenerator, accuracy_report, learn_calibration,
     legs_frame, load_calibration, matches_in_range, matches_on,
     next_match_days, overall_summary, recent_match_days, settle_tickets,
-    strategy_performance, surprising_legs, surprising_results,
+    strategy_calibration, strategy_performance, surprising_legs,
+    surprising_results,
     surprising_stats, tickets_frame, update_strategy_weights,
 )
 from predictiescor.tickets.watcher import status as watcher_status
 from predictiescor.data.odds_input import (
     automatic_odds, coverage as odds_coverage, import_csv,
-    line_movement, store_odds,
+    line_movement, moved_matches, store_odds,
     upcoming_template,
 )
 
@@ -141,6 +142,8 @@ with tab_new:
         st.divider()
         st.subheader(f"{len(tickets)} bilete pentru {day}")
 
+        # o singură interogare pentru toate biletele
+        mutari = moved_matches(db)
         for i, ticket in enumerate(tickets, 1):
             with st.container(border=True):
                 head = st.columns([3, 1, 1, 1, 1])
@@ -159,6 +162,20 @@ with tab_new:
                             format="percent", min_value=0.0, max_value=1.0),
                         "cotă": st.column_config.NumberColumn(format="%.2f"),
                     })
+
+                # Avertisment când piața s-a mutat mult pe un meci din bilet.
+                # Nu schimbă predicția — doar spune că modelul lucrează cu
+                # informație mai veche decât casele.
+                flagged = [(leg, mutari[leg.match_id]) for leg in ticket.legs
+                           if leg.match_id in mutari]
+                if flagged:
+                    detalii = " · ".join(
+                        f"**{leg.match_label}** ({move:.0%})"
+                        for leg, move in sorted(flagged, key=lambda x: -x[1]))
+                    st.warning(
+                        f"⚠️ Piața s-a mutat mult aici: {detalii}. Casele au "
+                        f"aflat ceva ce modelul nu știe — de obicei o "
+                        f"accidentare sau formația anunțată.")
 
         if st.button("Salvează biletele în baza de date"):
             generator = TicketGenerator(pipeline, db, stake=stake)
@@ -366,6 +383,42 @@ with tab_accuracy:
                 "(de obicei cornere/cartonașe pentru meciuri fără statistici "
                 "detaliate). Nu contează la acuratețe."
             )
+
+    st.divider()
+    st.subheader("Își cunoaște fiecare strategie șansele?")
+    calib = strategy_calibration(db)
+    if calib.empty:
+        st.caption("Încă nu sunt bilete decontate.")
+    else:
+        show = calib[["label", "bilete", "prezis", "real", "castigate",
+                      "așteptate", "neobișnuit"]].rename(
+            columns={"label": "strategie", "castigate": "câștigate"})
+        st.dataframe(
+            show, hide_index=True, width="stretch",
+            column_config={
+                "prezis": st.column_config.NumberColumn(format="percent"),
+                "real": st.column_config.NumberColumn(format="percent"),
+                "neobișnuit": st.column_config.ProgressColumn(
+                    "cât de neobișnuit", format="percent",
+                    min_value=0.0, max_value=1.0)})
+        st.caption(
+            "**Ultima coloană e cea care contează.** Spune cât de des ar ieși "
+            "un rezultat cel puțin la fel de ciudat, dacă modelul ar avea "
+            "dreptate. Valori mari = normal. Sub ~5% = strategia chiar nu "
+            "își cunoaște șansele."
+        )
+        neobisnuite = calib[calib["neobișnuit"] < 0.05]
+        if neobisnuite.empty:
+            st.info(
+                "Nicio strategie nu deviază neobișnuit. „Bilet cu cotă mare” "
+                "iese 0% — dar la o șansă prezisă de 14% pe bilet, să nu iasă "
+                "niciunul din 16 e ghinion obișnuit, nu defect.", icon="✅")
+        else:
+            st.warning(
+                "Deviază neobișnuit: "
+                + ", ".join(f"**{r.label}** ({r.real:.0%} față de "
+                            f"{r.prezis:.0%} prezis)"
+                            for r in neobisnuite.itertuples()))
 
     st.divider()
     st.subheader("Cum se descurcă fiecare strategie")

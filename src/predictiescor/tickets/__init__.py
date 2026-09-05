@@ -6,7 +6,7 @@ from .generator import (
 )
 from .learning import (
     Calibrator, accuracy_report, learn_calibration, load_calibration,
-    overall_summary, strategy_performance, update_strategy_weights,
+    overall_summary, strategy_calibration, strategy_performance, update_strategy_weights,
 )
 from .settlement import (
     legs_frame, settle_tickets, tickets_frame,
