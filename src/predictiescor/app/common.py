@@ -60,8 +60,27 @@ def load_summary(_version: int = 0) -> dict:
 
 
 def data_version() -> int:
-    """Versiunea datelor: creste cand utilizatorul apasa 'Reincarca'."""
-    return int(st.session_state.get("data_version", 0))
+    """Versiunea datelor: se schimba la ORICE scriere in baza.
+
+    Derivata din ora ultimei modificari a fisierelor bazei, nu dintr-un simplu
+    contor de sesiune. Actualizarile din linia de comanda - sarcina programata
+    sau `update.py` rulat de mana - scriu in aceeasi baza, iar aplicatia trebuie
+    sa le observe. Altfel arata cifre vechi pana la o repornire, exact ce s-a
+    intamplat dupa recuperarea zilelor pierdute.
+
+    Ne uitam si la fisierul `-wal`: in modul WAL scrierile ajung acolo intai,
+    deci `.db` poate ramane neatins minute intregi.
+    """
+    stamp = 0
+    base = get_config().db_path
+    for path in (base, base.with_name(base.name + "-wal")):
+        try:
+            stamp = max(stamp, int(path.stat().st_mtime))
+        except OSError:
+            continue
+    # contorul de sesiune ramane, ca butonul de reincarcare sa functioneze
+    # chiar daca ora fisierului nu s-a schimbat
+    return stamp + int(st.session_state.get("data_version", 0))
 
 
 def bump_data_version() -> None:

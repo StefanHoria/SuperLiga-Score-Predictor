@@ -75,3 +75,63 @@ def test_conversion_is_never_a_shift_of_zero():
     """Daca cineva sterge din greseala conversia, testul asta cade."""
     utc = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
     assert utc.astimezone(LOCAL_TZ).hour != utc.hour
+
+
+# ----------------------------------------------------------------------
+# Versiunea datelor
+#
+# Era un simplu contor de sesiune, deci actualizarile din linia de comanda -
+# sarcina programata sau update.py - erau invizibile: aplicatia arata cifre
+# vechi pana la o repornire.
+# ----------------------------------------------------------------------
+def test_the_version_follows_the_database_file(tmp_path, monkeypatch):
+    import time
+    import common
+    from predictiescor.storage.db import Database
+
+    path = tmp_path / "versiune.db"
+    Database(path)
+
+    class _Cfg:
+        db_path = path
+
+    monkeypatch.setattr(common, "get_config", lambda: _Cfg())
+    monkeypatch.setattr(common.st, "session_state", {}, raising=False)
+
+    before = common.data_version()
+    time.sleep(1.1)
+    with Database(path).connect() as conn:
+        conn.execute("INSERT INTO meta(key, value) VALUES ('x','1')")
+
+    assert common.data_version() != before
+
+
+def test_a_missing_database_does_not_crash_the_version(tmp_path, monkeypatch):
+    import common
+
+    class _Cfg:
+        db_path = tmp_path / "nu-exista.db"
+
+    monkeypatch.setattr(common, "get_config", lambda: _Cfg())
+    monkeypatch.setattr(common.st, "session_state", {}, raising=False)
+    assert common.data_version() == 0
+
+
+def test_the_session_counter_still_forces_a_change(tmp_path, monkeypatch):
+    """Butonul de reincarcare trebuie sa mearga si daca fisierul n-a fost atins."""
+    import common
+    from predictiescor.storage.db import Database
+
+    path = tmp_path / "buton.db"
+    Database(path)
+
+    class _Cfg:
+        db_path = path
+
+    state = {}
+    monkeypatch.setattr(common, "get_config", lambda: _Cfg())
+    monkeypatch.setattr(common.st, "session_state", state, raising=False)
+
+    before = common.data_version()
+    state["data_version"] = 1
+    assert common.data_version() == before + 1
