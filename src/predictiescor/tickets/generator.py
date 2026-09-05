@@ -146,6 +146,21 @@ class Strategy:
     allow_same_match: bool = False
 
 
+# Strategia "Bilet de valoare" a fost RETRASA pe 6 septembrie 2026.
+#
+# Alegea ponturile unde modelul da o sansa mai mare decat cota casei. Masurat
+# pe 1004 meciuri cu cote de inchidere, exact acele dezacorduri sunt eroarea
+# modelului, nu informatie in plus: cu cat se abate mai mult de piata, cu atat
+# pierde mai mult (avantaj -0.0210 RPS pe dezacordurile mari), iar ROI-ul
+# scade pe masura ce ceri un avantaj mai mare. In practica a produs 3 bilete,
+# toate pierzatoare.
+#
+# Pana acum nu conta: fara cote pre-meci nu putea rula deloc. De cand le aducem
+# de la Flashscore ar fi inceput sa genereze bilete pe o regula despre care
+# stim ca e anti-predictiva, asa ca am scos-o.
+#
+# `require_value` ramane in `Strategy`: cotele reale sunt in continuare utile
+# pentru pret si comparatie, iar cine vrea sa reincerce masuratoarea are unde.
 STRATEGIES: list[Strategy] = [
     Strategy(
         "sigur", "Bilet sigur",
@@ -157,11 +172,7 @@ STRATEGIES: list[Strategy] = [
         "Compromis între șansă și cotă — profilul folosit cel mai des.",
         prob_range=(0.50, 0.72), legs=(3, 4),
     ),
-    Strategy(
-        "valoare", "Bilet de valoare",
-        "Doar selecții unde modelul dă o șansă mai mare decât cota casei.",
-        prob_range=(0.35, 0.85), legs=(2, 4), require_value=True,
-    ),
+
     Strategy(
         "goluri", "Bilet pe goluri",
         "Numai piețe de goluri: peste/sub și ambele marchează.",

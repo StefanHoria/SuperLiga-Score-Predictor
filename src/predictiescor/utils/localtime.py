@@ -47,9 +47,17 @@ def local_time(value, fmt: str = DEFAULT_FORMAT) -> str:
 
 
 def local_series(values, fmt: str = DEFAULT_FORMAT) -> pd.Series:
-    """Aceeasi conversie, pentru o coloana intreaga."""
-    moments = pd.to_datetime(pd.Series(list(values)), utc=True, errors="coerce")
-    return moments.dt.tz_convert(LOCAL_TZ).dt.strftime(fmt).fillna("")
+    """Aceeasi conversie, pentru o coloana intreaga.
+
+    **Pastreaza indexul intrarii.** Fara asta, atribuind rezultatul intr-un
+    tabel sortat sau filtrat, pandas alinia dupa index si punea orele pe
+    randurile gresite - in tacere, fara nicio eroare. Intr-un tabel sortat
+    descrescator, orele ieseau pur si simplu inversate.
+    """
+    source = values if isinstance(values, pd.Series) else pd.Series(list(values))
+    moments = pd.to_datetime(source, utc=True, errors="coerce")
+    converted = moments.dt.tz_convert(LOCAL_TZ).dt.strftime(fmt).fillna("")
+    return pd.Series(converted.to_numpy(), index=source.index)
 
 
 def now_local() -> datetime:

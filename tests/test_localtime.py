@@ -135,3 +135,36 @@ def test_the_session_counter_still_forces_a_change(tmp_path, monkeypatch):
     before = common.data_version()
     state["data_version"] = 1
     assert common.data_version() == before + 1
+
+
+# ----------------------------------------------------------------------
+# Alinierea indexului
+#
+# `local_series` intorcea mereu index 0..n-1. Atribuit intr-un tabel sortat sau
+# filtrat, pandas alinia dupa index si punea orele pe randurile GRESITE - in
+# tacere. Intr-un tabel sortat descrescator, orele ieseau inversate.
+# ----------------------------------------------------------------------
+def test_a_sorted_table_keeps_each_row_its_own_hour():
+    import pandas as pd
+    frame = pd.DataFrame({"utc": ["2026-09-06T12:00:00+00:00",
+                                  "2026-09-06T17:30:00+00:00",
+                                  "2026-09-07T14:00:00+00:00"]})
+    ordered = frame.sort_values("utc", ascending=False)
+    ordered["ora"] = local_series(ordered["utc"], "%H:%M")
+    assert list(ordered["ora"]) == ["17:00", "20:30", "15:00"]
+
+
+def test_a_filtered_table_is_not_left_with_blanks():
+    import pandas as pd
+    frame = pd.DataFrame({"utc": ["2026-09-06T12:00:00+00:00",
+                                  "2026-09-06T17:30:00+00:00",
+                                  "2026-09-07T14:00:00+00:00"]})
+    kept = frame[frame["utc"] > "2026-09-06T13:00:00+00:00"].copy()
+    kept["ora"] = local_series(kept["utc"], "%H:%M")
+    assert list(kept["ora"]) == ["20:30", "17:00"]
+    assert kept["ora"].notna().all()
+
+
+def test_a_plain_list_still_works():
+    out = local_series(["2026-09-06T12:00:00+00:00"], "%H:%M")
+    assert list(out) == ["15:00"]

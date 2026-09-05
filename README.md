@@ -568,6 +568,25 @@ Atenție la distincție: piețele **secundare** (cornere, marcatori) chiar sunt
 prost calibrate — cornere 59% prezis vs 52% real, marcatori 46% vs 38% — dar
 acelea se corectează deja automat, din biletele decontate.
 
+### Calibrarea pe piețe, după backfill-ul curat
+
+Măsurat pe 336 de ponturi decontate, 6 septembrie 2026:
+
+| Piață | Ponturi | Prezis | Real | Diferență |
+|---|---|---|---|---|
+| total goluri | 106 | 80,7 % | 80,2 % | **−0,6** |
+| cartonașe | 76 | 77,3 % | 76,3 % | −1,0 |
+| șansă dublă | 67 | 72,0 % | 67,2 % | −4,8 |
+| cornere | 34 | 62,9 % | 55,9 % | −7,0 |
+| echipa marchează | 22 | 81,3 % | 77,3 % | −4,1 |
+| **marcatori** | 21 | 46,9 % | **14,3 %** | **−32,6** |
+| 1X2 | 7 | 45,1 % | 57,1 % | +12,1 |
+
+Pe ansamblu: prezis 73,2 %, real 69,0 %. Piețele de goluri și cartonașe sunt
+**foarte bine calibrate** — sub un punct diferență pe peste 180 de ponturi.
+Marcatorii sunt cazul patologic; restul diferențelor sunt în zgomot la
+dimensiunile astea de eșantion.
+
 ### Ce NU a ajutat
 
 Avantajul de teren estimat **per echipă** (în loc de unul comun pe ligă) nu a
@@ -969,13 +988,16 @@ tocmai fiindcă măsurătoarea nu le-a susținut. Peste câteva luni de fotograf
   explicit în loc să tacă, dar nu îl poate repara singur.
 * **Backfill-ul de bilete e onest, dar scurt.** Pe câteva zeci de bilete,
   ROI-ul e dominat de noroc. Ai nevoie de câteva sute pentru o concluzie.
-* **Cele 110 bilete de backfill din august au fost generate cu o scurgere pe
-  piața de marcatori.** Modelul de jucători folosea agregate sezoniere
-  cumulate *la zi*, care nu se pot tăia la data backtestului — deci „știa"
-  golurile marcate după ziua pentru care paria. Restul piețelor (1X2, goluri,
-  cornere, cartonașe) erau curate: acolo tăierea la `cutoff` se făcea corect.
-  Scurgerea e reparată; **cifrele vechi pe marcatori rămân optimiste** până la
-  un backfill refăcut.
+* **Piața de marcatori e nefolosibilă deocamdată.** Backfill-ul refăcut fără
+  scurgere (6 septembrie 2026) arată cât de mult ascundea ea: modelul prezice
+  **46,9 %**, se întâmplă **14,3 %** — de trei ori mai puțin, pe 21 de ponturi.
+  Diferența e de **3 abateri standard**, deci nu e zgomot. Cu scurgerea
+  activă, aceleași cifre arătau 46,3 % vs 36,4 %.
+
+  Calibratorul a prins corecția (pe intervalul 50–65 % prezicea 57,4 % și s-a
+  observat 0 % din 5), deci probabilitățile se domolesc automat. Dar 21 de
+  ponturi sunt puține și pentru calibrator: **nu te baza pe biletele cu
+  marcatori** până nu se strâng câteva sute.
 * **Logica de „valoare" nu are avantaj demonstrabil** — ba pe dezacordurile
   mari pierde măsurabil. Vezi *Când modelul nu e de acord cu piața*.
 * **Absențele nu intră în model**, deși se colectează. Vezi secțiunea de mai

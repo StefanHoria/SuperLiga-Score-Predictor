@@ -85,6 +85,7 @@ class Database:
         expected = {
             "match_team_stats": TEAM_STAT_COLUMNS,
             "player_match_stats": PLAYER_STAT_COLUMNS,
+            "odds": ("opening", "updated_at"),
         }
         for table, columns in expected.items():
             existing = {row["name"] for row in
@@ -93,7 +94,8 @@ class Database:
                 continue
             for column in columns:
                 if column not in existing:
-                    kind = "TEXT" if column == "position" else "REAL"
+                    kind = ("TEXT" if column in ("position", "updated_at")
+                            else "REAL")
                     conn.execute(
                         f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
                     log.info("migrare: am adaugat %s.%s", table, column)
@@ -561,15 +563,25 @@ class Database:
     # Cote
     # ------------------------------------------------------------------
     def upsert_odds(self, rows: Iterable[tuple]) -> int:
-        rows = list(rows)
+        """Scrie cote. Randurile pot avea 5 elemente (fara deschidere) sau 6.
+
+        Pretul se actualizeaza la fiecare rulare - el e "cota de acum". Dar
+        **deschiderea se scrie o singura data**: e prin definitie prima cota
+        vazuta, iar suprascrierea ei ar sterge tocmai diferenta care ne
+        intereseaza. `COALESCE` pastreaza ce era deja.
+        """
+        rows = [tuple(r) + (None,) * (6 - len(r)) for r in rows]
         if not rows:
             return 0
+        now = _utcnow()
         with self.connect() as conn:
             conn.executemany(
-                "INSERT INTO odds(match_id, bookmaker, market, selection, price)"
-                " VALUES (?,?,?,?,?)"
+                "INSERT INTO odds(match_id, bookmaker, market, selection,"
+                " price, opening, updated_at) VALUES (?,?,?,?,?,?,'" + now + "')"
                 " ON CONFLICT(match_id, bookmaker, market, selection)"
-                " DO UPDATE SET price = excluded.price",
+                " DO UPDATE SET price = excluded.price,"
+                "   opening = COALESCE(odds.opening, excluded.opening),"
+                "   updated_at = excluded.updated_at",
                 rows,
             )
         return len(rows)

@@ -22,7 +22,9 @@ from predictiescor.tickets import (
 )
 from predictiescor.tickets.watcher import status as watcher_status
 from predictiescor.data.odds_input import (
-    coverage as odds_coverage, import_csv, store_odds, upcoming_template,
+    automatic_odds, coverage as odds_coverage, import_csv,
+    line_movement, store_odds,
+    upcoming_template,
 )
 
 setup_page("Bilete", "🎫")
@@ -410,21 +412,93 @@ with tab_accuracy:
 # ======================================================================
 with tab_odds:
     st.markdown(
-        "Fără cotele casei, modelul nu are cu ce să compare, iar strategia "
-        "**Bilet de valoare** nu produce nimic. Cotele istorice le avem "
-        "automat, dar doar pentru meciuri deja jucate — pentru cele care "
-        "urmează, le introduci tu."
+        "Cotele se aduc **automat de la Flashscore**, de la cinci case din "
+        "România, pentru meciurile din următoarele zece zile. Introducerea "
+        "manuală rămâne pentru casele pe care Flashscore nu le listează."
     )
 
     cov = odds_coverage(db)
-    cols = st.columns(3)
+    have = automatic_odds(db)
+    cols = st.columns(4)
     cols[0].metric("Meciuri viitoare", cov["meciuri_viitoare"])
-    cols[1].metric("Cu cote introduse", cov["cu_cote"])
-    cols[2].metric("Acoperire",
-                   f"{100 * cov['cu_cote'] / max(1, cov['meciuri_viitoare']):.0f}%")
+    cols[1].metric("Cu cote", cov["cu_cote"])
+    cols[2].metric("Case listate", have["case"])
+    if have["marja"] is not None:
+        cols[3].metric("Marja medie", f"{have['marja']:.1%}",
+                       help="Cât își ia casa. Sub 5% e o piață strânsă.")
+
+    st.caption(
+        f"Cele **{cov['meciuri_viitoare']}** de meciuri viitoare includ tot "
+        f"calendarul sezonului; casele publică cote abia cu câteva zile "
+        f"înainte, deci acoperirea de **{cov['cu_cote']}** e normală, nu o "
+        f"lipsă."
+    )
+
+    if st.button("Adu cotele acum", type="primary", key="fetch_odds"):
+        from predictiescor.data.flashscore import FlashscoreProvider
+        with st.status("Interoghez Flashscore…", expanded=True) as status:
+            provider = FlashscoreProvider(db=db)
+            if not provider.odds_available:
+                status.update(label="Sursa e oprită din .env "
+                                    "(FLASHSCORE_ODDS)", state="error")
+            else:
+                try:
+                    result = provider.fetch_odds()
+                    if result.errors:
+                        status.update(label=result.errors[0], state="error")
+                    else:
+                        st.write(f"{result.matches} meciuri, "
+                                 f"{result.odds} cote scrise.")
+                        status.update(label="Gata", state="complete")
+                        st.cache_data.clear()
+                except Exception as exc:  # noqa: BLE001
+                    status.update(label=f"A eșuat: {exc}", state="error")
+    st.caption("Durează câteva minute: fiecare meci costă `case × piețe` "
+               "cereri, iar între ele se așteaptă. Rulează oricum zilnic, "
+               "la actualizarea completă.")
+
+    if not have["pe_casa"].empty:
+        st.subheader("Ce avem acum, pe casă")
+        st.dataframe(have["pe_casa"], hide_index=True, width="stretch")
+        st.caption(
+            "`fs_avg` și `fs_max` nu sunt case, ci media și cel mai bun preț "
+            "peste toate — cel mai bun preț e ce ai obține alegând de fiecare "
+            "dată casa cea mai generoasă."
+        )
 
     st.divider()
-    st.subheader("Completează direct în tabel")
+    st.subheader("Unde s-a mutat piața")
+    st.caption(
+        "Singurul semnal din aplicație care vine din informație pe care "
+        "modelul **nu** o are. Când o casă mută cota mult de la deschidere, a "
+        "aflat ceva — de obicei o accidentare sau formația anunțată. Mutarea e "
+        "măsurată în șansă implicită, nu în cotă: de la 1.20 la 1.30 contează "
+        "mult mai mult decât de la 6.00 la 6.10."
+    )
+    prag = st.slider("Mutare minimă (puncte de șansă)", 2, 20, 5, step=1,
+                     format="%d%%", key="prag_miscare")
+    moved = line_movement(db, min_move=prag / 100.0)
+    if moved.empty:
+        st.info("Nicio mutare peste prag. Coboară pragul sau adu cotele.")
+    else:
+        show = moved.copy()
+        show["ora"] = local_series(show["utc_date"], "%d.%m %H:%M")
+        show["mutare"] = show["mutare"].abs()
+        st.dataframe(
+            show[["ora", "meci", "bookmaker", "market", "selection",
+                  "opening", "price", "mutare", "sens"]]
+            .rename(columns={"bookmaker": "casă", "market": "piață",
+                             "selection": "selecție", "opening": "deschidere",
+                             "price": "acum"}),
+            hide_index=True, width="stretch", height=340,
+            column_config={
+                "deschidere": st.column_config.NumberColumn(format="%.2f"),
+                "acum": st.column_config.NumberColumn(format="%.2f"),
+                "mutare": st.column_config.ProgressColumn(
+                    format="percent", min_value=0.0, max_value=0.25)})
+
+    st.divider()
+    st.subheader("Completează manual (opțional)")
     bookmaker = st.text_input("Casa de pariuri", value="manual",
                               help="Ține minte de unde vin cotele, ca să poți "
                                    "compara mai târziu între case.")
@@ -463,10 +537,12 @@ with tab_odds:
         st.cache_data.clear()
 
     st.info(
-        "**De ce nu se descarcă automat?** Casele de pariuri își randează "
-        "cotele din JavaScript și le schimbă constant; raclarea lor ar fi și "
-        "fragilă, și într-o zonă incertă din punct de vedere al termenilor de "
-        "utilizare. Introducerea manuală merge cu orice casă și nu se strică.",
+        "**Cât de sigură e sursa automată?** Cotele vin dintr-un endpoint "
+        "nedocumentat al Flashscore. Merge azi și e verificat pe date reale, "
+        "dar se poate opri oricând, fără preaviz — codul semnalează explicit "
+        "când formatul se schimbă, în loc să scrie tăcut zero rânduri. "
+        "Introducerea manuală rămâne aici tocmai ca plasă de siguranță, și "
+        "pentru casele care nu apar la Flashscore.",
         icon="ℹ️")
 
 # ======================================================================

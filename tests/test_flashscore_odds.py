@@ -299,3 +299,143 @@ def test_the_counter_resets_after_a_success():
     out = _FakeProvider([True, True, False, True, True, False]).run()
     assert out["oprit"] is False
     assert out["scrise"] == 2
+
+
+# ----------------------------------------------------------------------
+# Raportul de acoperire din pagina "Cotele casei"
+# ----------------------------------------------------------------------
+def _db_with_odds(tmp_path):
+    from predictiescor.storage.db import Database
+    db = Database(tmp_path / "acoperire.db")
+    match_id = db.upsert_match(season=2026,
+                               utc_date="2026-09-20T17:30:00+00:00",
+                               home="FCSB", away="UTA Arad", status="scheduled")
+    db.upsert_odds([
+        (match_id, "betano", "1x2", "home", 2.00),
+        (match_id, "betano", "1x2", "draw", 3.40),
+        (match_id, "betano", "1x2", "away", 3.80),
+        (match_id, "fs_max", "1x2", "home", 2.10),
+        (match_id, "fs_max", "1x2", "draw", 3.50),
+        (match_id, "fs_max", "1x2", "away", 3.90),
+    ])
+    return db
+
+
+def test_aggregates_are_not_counted_as_bookmakers(tmp_path):
+    """`fs_avg` si `fs_max` sunt calcule proprii, nu case de pariuri."""
+    from predictiescor.data.odds_input import automatic_odds
+    report = automatic_odds(_db_with_odds(tmp_path))
+    assert report["case"] == 1
+    assert set(report["pe_casa"]["casă"]) == {"betano", "fs_max"}
+
+
+def test_the_margin_is_computed_only_on_real_bookmakers(tmp_path):
+    """Pe 'cel mai bun pret' marja iese artificial mica, uneori negativa."""
+    from predictiescor.data.odds_input import automatic_odds
+    report = automatic_odds(_db_with_odds(tmp_path))
+    expected = 1 / 2.00 + 1 / 3.40 + 1 / 3.80 - 1
+    assert report["marja"] == pytest.approx(expected, abs=1e-6)
+
+
+def test_no_odds_gives_no_margin(tmp_path):
+    from predictiescor.data.odds_input import automatic_odds
+    from predictiescor.storage.db import Database
+    report = automatic_odds(Database(tmp_path / "gol.db"))
+    assert report["marja"] is None
+    assert report["case"] == 0
+
+
+# ----------------------------------------------------------------------
+# Cota de deschidere
+#
+# Era extrasa de parser, apoi aruncata: tabela n-avea coloana, iar `upsert_odds`
+# suprascria pretul la fiecare rulare. Fiecare zi de rulari stergea definitiv
+# preturile anterioare, desi README promitea ca le pastram.
+# ----------------------------------------------------------------------
+def _match_with_odds(tmp_path, name="deschidere.db"):
+    from predictiescor.storage.db import Database
+    db = Database(tmp_path / name)
+    match_id = db.upsert_match(season=2026,
+                               utc_date="2026-09-20T17:30:00+00:00",
+                               home="FCSB", away="UTA Arad", status="scheduled")
+    return db, match_id
+
+
+def test_the_opening_price_is_stored(tmp_path):
+    db, match_id = _match_with_odds(tmp_path)
+    db.upsert_odds([(match_id, "betano", "1x2", "home", 2.85, 2.70)])
+    with db.connect() as conn:
+        row = conn.execute("SELECT price, opening FROM odds").fetchone()
+    assert row["price"] == 2.85
+    assert row["opening"] == 2.70
+
+
+def test_the_opening_is_never_overwritten(tmp_path):
+    """Miezul: deschiderea e prima cota vazuta si ramane asa."""
+    db, match_id = _match_with_odds(tmp_path)
+    db.upsert_odds([(match_id, "betano", "1x2", "home", 2.85, 2.70)])
+    db.upsert_odds([(match_id, "betano", "1x2", "home", 2.40, 2.55)])
+    with db.connect() as conn:
+        row = conn.execute("SELECT price, opening FROM odds").fetchone()
+    assert row["price"] == 2.40, "prețul curent se actualizează"
+    assert row["opening"] == 2.70, "deschiderea rămâne cea dintâi"
+
+
+def test_rows_without_an_opening_still_work(tmp_path):
+    """Agregatele `fs_avg`/`fs_max` n-au deschidere proprie."""
+    db, match_id = _match_with_odds(tmp_path)
+    db.upsert_odds([(match_id, "fs_max", "1x2", "home", 3.10)])
+    with db.connect() as conn:
+        row = conn.execute("SELECT price, opening FROM odds").fetchone()
+    assert row["price"] == 3.10
+    assert row["opening"] is None
+
+
+def test_a_later_opening_fills_a_missing_one(tmp_path):
+    """Daca prima scriere n-a avut deschidere, o acceptam pe urmatoarea."""
+    db, match_id = _match_with_odds(tmp_path)
+    db.upsert_odds([(match_id, "betano", "1x2", "home", 2.85)])
+    db.upsert_odds([(match_id, "betano", "1x2", "home", 2.80, 2.70)])
+    with db.connect() as conn:
+        assert conn.execute("SELECT opening FROM odds").fetchone()["opening"] == 2.70
+
+
+def test_the_write_time_is_recorded(tmp_path):
+    db, match_id = _match_with_odds(tmp_path)
+    db.upsert_odds([(match_id, "betano", "1x2", "home", 2.85, 2.70)])
+    with db.connect() as conn:
+        assert conn.execute("SELECT updated_at FROM odds").fetchone()["updated_at"]
+
+
+# ----------------------------------------------------------------------
+# Mișcarea liniei
+# ----------------------------------------------------------------------
+def test_movement_is_measured_in_probability_not_price(tmp_path):
+    """O mutare 1.20 -> 1.30 contează mult mai mult ca 6.00 -> 6.10."""
+    from predictiescor.data.odds_input import line_movement
+    db, match_id = _match_with_odds(tmp_path)
+    db.upsert_odds([
+        (match_id, "betano", "1x2", "home", 1.30, 1.20),   # mutare mare
+        (match_id, "betano", "1x2", "away", 6.10, 6.00),   # mutare mica
+    ])
+    moved = line_movement(db, min_move=0.02)
+    assert list(moved["selection"]) == ["home"]
+
+
+def test_the_direction_is_reported(tmp_path):
+    from predictiescor.data.odds_input import line_movement
+    db, match_id = _match_with_odds(tmp_path)
+    db.upsert_odds([
+        (match_id, "betano", "1x2", "home", 1.65, 2.25),   # cota a scazut
+        (match_id, "betano", "1x2", "away", 5.00, 3.25),   # cota a crescut
+    ])
+    moved = line_movement(db, min_move=0.05).set_index("selection")
+    assert "MAI MULT" in moved.loc["home", "sens"]
+    assert "MAI PUȚIN" in moved.loc["away", "sens"]
+
+
+def test_odds_without_an_opening_are_not_movement(tmp_path):
+    from predictiescor.data.odds_input import line_movement
+    db, match_id = _match_with_odds(tmp_path)
+    db.upsert_odds([(match_id, "fs_max", "1x2", "home", 3.10)])
+    assert line_movement(db).empty

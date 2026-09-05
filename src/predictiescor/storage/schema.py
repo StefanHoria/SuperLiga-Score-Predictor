@@ -108,6 +108,12 @@ CREATE TABLE IF NOT EXISTS odds (
     market    TEXT NOT NULL,     -- 1x2 | ou_2.5 | btts | ah_-0.5 ...
     selection TEXT NOT NULL,     -- home|draw|away|over|under|yes|no
     price     REAL NOT NULL,
+    -- Cota la care casa a DESCHIS piata. Nu se suprascrie niciodata: miscarea
+    -- de la deschidere la inchidere e cel mai sensibil semn ca piata a aflat
+    -- ceva (o accidentare, formatia). Fara ea, fiecare rulare stergea definitiv
+    -- pretul anterior si informatia se pierdea zilnic.
+    opening    REAL,
+    updated_at TEXT,
     PRIMARY KEY (match_id, bookmaker, market, selection)
 );
 

@@ -411,9 +411,11 @@ class FlashscoreProvider(DataProvider):
         """
         rows: list[tuple] = []
         for book, priced in by_book.items():
-            rows.extend((match_id, book, r.market, r.selection, r.price)
-                        for r in priced)
-        rows.extend((match_id, name, r.market, r.selection, r.price)
+            rows.extend((match_id, book, r.market, r.selection,
+                         r.price, r.opening) for r in priced)
+        # Agregatele n-au deschidere proprie: media si maximul se recalculeaza
+        # la fiecare rulare, deci "deschiderea" lor n-ar insemna nimic.
+        rows.extend((match_id, name, r.market, r.selection, r.price, None)
                     for name, r in aggregate(by_book))
         return self.db.upsert_odds(rows)
 

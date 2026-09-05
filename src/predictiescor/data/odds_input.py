@@ -143,6 +143,88 @@ def upcoming_template(db: Database, limit: int = 20) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def line_movement(db: Database, *, min_move: float = 0.08,
+                  upcoming_only: bool = True) -> pd.DataFrame:
+    """Unde s-a mutat mult cota de la deschidere pana acum.
+
+    Nu e o predictie de-a noastra, ci piata care spune ca a aflat ceva - de
+    obicei o accidentare, o formatie anuntata sau bani multi pe o parte. E
+    singurul semnal din aplicatie care vine din informatie pe care modelul
+    NU o are.
+
+    `min_move` e in probabilitate implicita, nu in cota: o mutare de la 1.20
+    la 1.30 conteaza mult mai mult decat una de la 6.00 la 6.10, desi in cota
+    arata la fel.
+    """
+    sql = """
+        SELECT ht.name AS gazda, at.name AS oaspete, m.utc_date,
+               o.bookmaker, o.market, o.selection, o.opening, o.price
+        FROM odds o
+        JOIN matches m ON m.match_id = o.match_id
+        JOIN teams ht ON ht.team_id = m.home_team_id
+        JOIN teams at ON at.team_id = m.away_team_id
+        WHERE o.opening IS NOT NULL AND o.opening > 1.0 AND o.price > 1.0
+    """
+    if upcoming_only:
+        sql += " AND m.home_goals IS NULL"
+    with db.connect() as conn:
+        frame = pd.read_sql_query(sql, conn)
+    if frame.empty:
+        return frame.assign(mutare=[], sens=[]) if frame.empty else frame
+
+    frame["sansa_deschidere"] = 1.0 / frame["opening"]
+    frame["sansa_acum"] = 1.0 / frame["price"]
+    frame["mutare"] = frame["sansa_acum"] - frame["sansa_deschidere"]
+    frame["sens"] = frame["mutare"].map(
+        lambda v: "piața crede MAI MULT" if v > 0 else "piața crede MAI PUȚIN")
+
+    moved = frame[frame["mutare"].abs() >= min_move].copy()
+    moved["meci"] = moved["gazda"] + " — " + moved["oaspete"]
+    moved = moved.sort_values("mutare", key=abs, ascending=False)
+    return moved[["meci", "utc_date", "bookmaker", "market", "selection",
+                  "opening", "price", "mutare", "sens"]]
+
+
+def automatic_odds(db: Database) -> dict[str, Any]:
+    """Ce cote avem aduse automat pentru meciurile care urmeaza.
+
+    Separa casele reale de agregatele noastre (`fs_avg`, `fs_max`), fiindca
+    marja se calculeaza doar pe o casa adevarata: pe "cel mai bun pret" iese
+    artificial mica, uneori negativa.
+    """
+    sql = """
+        SELECT o.bookmaker, COUNT(DISTINCT o.match_id) AS meciuri,
+               COUNT(*) AS cote
+        FROM odds o JOIN matches m ON m.match_id = o.match_id
+        WHERE m.home_goals IS NULL
+        GROUP BY o.bookmaker ORDER BY cote DESC
+    """
+    with db.connect() as conn:
+        frame = pd.read_sql_query(sql, conn)
+        margins = pd.read_sql_query(
+            "SELECT o.match_id, o.bookmaker, o.selection, o.price FROM odds o"
+            " JOIN matches m ON m.match_id = o.match_id"
+            " WHERE m.home_goals IS NULL AND o.market = '1x2'"
+            "   AND o.bookmaker NOT LIKE 'fs_%'", conn)
+
+    margin = None
+    if not margins.empty:
+        wide = margins.pivot_table(index=["match_id", "bookmaker"],
+                                   columns="selection", values="price")
+        wide = wide.dropna(subset=[c for c in ("home", "draw", "away")
+                                   if c in wide.columns])
+        if not wide.empty and {"home", "draw", "away"} <= set(wide.columns):
+            implied = (1.0 / wide[["home", "draw", "away"]]).sum(axis=1)
+            margin = float(implied.mean() - 1.0)
+
+    real = frame[~frame["bookmaker"].str.startswith("fs_")]
+    return {
+        "pe_casa": frame.rename(columns={"bookmaker": "casă"}),
+        "case": int(len(real)),
+        "marja": margin,
+    }
+
+
 def coverage(db: Database) -> dict[str, int]:
     """Cate meciuri viitoare au deja cote."""
     with db.connect() as conn:
