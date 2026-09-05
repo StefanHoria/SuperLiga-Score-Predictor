@@ -925,8 +925,90 @@ class Database:
                 for r in frame.itertuples()]
         return frame[keep].reset_index(drop=True)
 
+    def player_at_other_team(self, name: str, team_id: int) -> int | None:
+        """Acelasi jucator, dar inregistrat la alta echipa. `None` daca nu e.
+
+        Cerem potrivire exacta pe nume normalizat: la o cautare in toata liga,
+        o potrivire aproximativa ar uni oameni diferiti.
+        """
+        from ..utils.teamnames import strip_diacritics
+
+        wanted = strip_diacritics(str(name)).lower().strip()
+        if not wanted:
+            return None
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT player_id, name FROM players"
+                " WHERE team_id IS NOT NULL AND team_id != ?",
+                (int(team_id),)).fetchall()
+        hits = [int(r["player_id"]) for r in rows
+                if strip_diacritics(str(r["name"])).lower().strip() == wanted]
+        return hits[0] if len(hits) == 1 else None
+
+    def move_player(self, player_id: int, team_id: int) -> None:
+        """Muta jucatorul la alta echipa, pastrandu-i tot istoricul."""
+        with self.connect() as conn:
+            conn.execute("UPDATE OR IGNORE players SET team_id = ?"
+                         " WHERE player_id = ?", (int(team_id), int(player_id)))
+
+    def merge_players(self, keep_id: int, drop_id: int) -> int:
+        """Uneste doua randuri care sunt acelasi om. Intoarce randurile mutate."""
+        moved = 0
+        with self.connect() as conn:
+            for table in ("player_match_stats", "player_season_stats",
+                          "player_external_ids", "player_availability",
+                          "manual_departures", "news_facts"):
+                try:
+                    cursor = conn.execute(
+                        f"UPDATE OR IGNORE {table} SET player_id = ?"
+                        f" WHERE player_id = ?", (int(keep_id), int(drop_id)))
+                    moved += cursor.rowcount or 0
+                except sqlite3.OperationalError:
+                    continue  # tabela nu exista in baze mai vechi
+            conn.execute("DELETE FROM players WHERE player_id = ?", (int(drop_id),))
+        log.info("jucatori uniti: %s <- %s (%d randuri)", keep_id, drop_id, moved)
+        return moved
+
+    def sync_teams_from_appearances(self, *, source: str = "transfermarkt") -> int:
+        """Clubul unui jucator = echipa pentru care a jucat ultima data.
+
+        Se aplica DOAR jucatorilor pe care sursa de loturi nu-i cunoaste (cei
+        adusi de LPF, cu numele legal complet). Pentru ei nu exista alta cale
+        de a afla unde sunt, iar aparitiile pe teren sunt cea mai buna dovada:
+        Korenica jucase pe 5 septembrie pentru FCSB, dar figura la CFR Cluj,
+        clubul lui anterior.
+
+        Intoarce cate randuri s-au schimbat.
+        """
+        sql = """
+            UPDATE players SET team_id = (
+                SELECT s.team_id FROM player_match_stats s
+                JOIN matches m ON m.match_id = s.match_id
+                WHERE s.player_id = players.player_id AND s.minutes > 0
+                  AND s.team_id IS NOT NULL
+                ORDER BY m.utc_date DESC LIMIT 1)
+            WHERE NOT EXISTS (SELECT 1 FROM player_external_ids e
+                               WHERE e.player_id = players.player_id
+                                 AND e.source = ?)
+              AND EXISTS (SELECT 1 FROM player_match_stats s2
+                           WHERE s2.player_id = players.player_id
+                             AND s2.minutes > 0 AND s2.team_id IS NOT NULL)
+              AND team_id IS NOT (
+                SELECT s.team_id FROM player_match_stats s
+                JOIN matches m ON m.match_id = s.match_id
+                WHERE s.player_id = players.player_id AND s.minutes > 0
+                  AND s.team_id IS NOT NULL
+                ORDER BY m.utc_date DESC LIMIT 1)
+        """
+        with self.connect() as conn:
+            changed = conn.execute(sql, (str(source),)).rowcount or 0
+        if changed:
+            log.info("club actualizat dupa aparitii pentru %d jucatori", changed)
+        return changed
+
     def detach_missing_players(self, team_id: int,
-                               still_here: Iterable[int]) -> int:
+                               still_here: Iterable[int],
+                               *, source: str = "transfermarkt") -> int:
         """Scoate din lot jucatorii care nu mai apar in el.
 
         NU sterge jucatorul: aparitiile lui din meciurile trecute raman, si e
@@ -940,9 +1022,28 @@ class Database:
         marks = ",".join("?" * len(keep))
         with self.connect() as conn:
             cursor = conn.execute(
-                f"UPDATE players SET team_id = NULL"
-                f" WHERE team_id = ? AND player_id NOT IN ({marks})",
-                [int(team_id), *keep])
+                f"""
+                UPDATE players SET team_id = NULL
+                 WHERE team_id = ?
+                   AND player_id NOT IN ({marks})
+                   -- Doar jucatorii pe care sursa ii CUNOASTE. Cei adusi de
+                   -- LPF au numele legal complet ("Manuel Alberto Cunha
+                   -- Lopes"), iar Transfermarkt foloseste nume scurte, deci nu
+                   -- se potrivesc niciodata. Absenta lor de pe pagina nu
+                   -- inseamna ca au plecat - inseamna ca n-au fost acolo
+                   -- niciodata sub numele asta.
+                   AND EXISTS (SELECT 1 FROM player_external_ids e
+                                WHERE e.player_id = players.player_id
+                                  AND e.source = ?)
+                   -- Plasa de siguranta: cine a jucat de curand e la club.
+                   AND NOT EXISTS (
+                         SELECT 1 FROM player_match_stats s
+                         JOIN matches m ON m.match_id = s.match_id
+                         WHERE s.player_id = players.player_id
+                           AND s.minutes > 0
+                           AND m.utc_date >= datetime('now', '-30 days'))
+                """,
+                [int(team_id), *keep, str(source)])
             gone = cursor.rowcount or 0
         if gone:
             log.info("au plecat de la echipa %s: %d jucatori", team_id, gone)

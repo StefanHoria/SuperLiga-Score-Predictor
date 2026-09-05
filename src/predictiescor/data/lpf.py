@@ -666,6 +666,18 @@ class LpfProvider(DataProvider):
         if len(close) == 1:
             return close[0][1]
 
+        # Inainte de a crea un rand nou: exista jucatorul la ALTA echipa?
+        #
+        # Un transfer in timpul sezonului arata exact asa - LPF il vede in
+        # formatia clubului nou, dar el e inregistrat la cel vechi, deci nu se
+        # potriveste cu nimeni. Fara verificarea asta ieseau doi Korenica, unul
+        # la CFR Cluj si unul la FCSB, cu istoricul rupt in doua.
+        mutat = self.db.player_at_other_team(name, team_id)
+        if mutat is not None:
+            log.info("jucator transferat: %s -> echipa %s", name, team_id)
+            self.db.move_player(mutat, team_id)
+            return mutat
+
         return self.db.upsert_player(name, team_id)
 
     # ------------------------------------------------------------------

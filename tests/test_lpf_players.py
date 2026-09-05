@@ -189,7 +189,10 @@ from predictiescor.storage.db import Database as _Database
 def squad(tmp_path):
     db = _Database(tmp_path / "lot.db")
     team = db.upsert_team("FCSB", source="test")
-    ids = {name: db.upsert_player(name, team, source="test", ext_id=name)
+    # sursa conteaza: detasarea judeca doar jucatorii pe care Transfermarkt
+    # ii cunoaste, fiindca doar absenta LOR de pe pagina inseamna ceva
+    ids = {name: db.upsert_player(name, team, source="transfermarkt",
+                                  ext_id=name)
            for name in ("Ion Pop", "Vasile Ene", "Daniel Bîrligea")}
     return db, team, ids
 
@@ -226,7 +229,8 @@ def test_an_empty_roster_detaches_nobody(squad):
 def test_other_teams_are_untouched(squad):
     db, team, ids = squad
     other = db.upsert_team("CFR Cluj", source="test")
-    outsider = db.upsert_player("Radu Marin", other, source="test", ext_id="rm")
+    outsider = db.upsert_player("Radu Marin", other, source="transfermarkt",
+                                ext_id="rm")
     db.detach_missing_players(team, [ids["Ion Pop"]])
     with db.connect() as conn:
         row = conn.execute("SELECT team_id FROM players WHERE player_id = ?",
@@ -308,10 +312,11 @@ def test_a_player_already_out_of_the_squad_is_not_repeated(tmp_path):
     """Daca Transfermarkt l-a scos deja, nu mai e un conflict."""
     db = _Database(tmp_path / "scos.db")
     team = db.upsert_team("FCSB", source="test")
-    pid = db.upsert_player("Daniel Bîrligea", team, source="test")
+    pid = db.upsert_player("Daniel Bîrligea", team, source="transfermarkt",
+                           ext_id="b1")
     _news_departure(db, pid, "fanatik.ro")
-    db.detach_missing_players(team, [db.upsert_player("Altul", team,
-                                                      source="test")])
+    db.detach_missing_players(team, [db.upsert_player(
+        "Altul", team, source="transfermarkt", ext_id="altul")])
     assert db.reported_departures().empty
 
 
@@ -425,3 +430,144 @@ def test_marking_twice_does_not_duplicate(tmp_path):
     marks = db.manual_departures()
     assert len(marks) == 1
     assert marks.iloc[0]["note"] == "a doua"
+
+
+# ----------------------------------------------------------------------
+# Cine poate fi detasat
+#
+# Prima versiune detasa pe oricine lipsea de pe pagina Transfermarkt. Dar
+# jucatorii adusi de LPF au numele legal complet ("Manuel Alberto Cunha
+# Lopes"), iar Transfermarkt foloseste nume scurte - nu se potrivesc niciodata.
+# Asa au ajuns "fara club" Korenica si altii, care jucasera cu o zi inainte.
+# ----------------------------------------------------------------------
+def _played(db, player_id, team_id, when, minutes=90):
+    match_id = db.upsert_match(season=2026, utc_date=f"{when}T18:00:00+00:00",
+                               home="FCSB", away=f"Adversar {when}",
+                               home_goals=1, away_goals=0, status="finished")
+    db.upsert_player_stats(match_id, player_id, team_id,
+                           {"minutes": minutes, "goals": 0})
+
+
+def test_a_player_the_source_never_knew_is_not_detached(tmp_path):
+    """Fara id de la sursa, absenta lui de pe pagina nu inseamna nimic."""
+    db = _Database(tmp_path / "necunoscut.db")
+    team = db.upsert_team("FCSB", source="test")
+    known = db.upsert_player("Ion Pop", team, source="transfermarkt", ext_id="1")
+    lpf_only = db.upsert_player("Manuel Alberto Cunha Lopes", team,
+                                source="lpf", ext_id="9")
+
+    db.detach_missing_players(team, [known])
+    with db.connect() as conn:
+        row = conn.execute("SELECT team_id FROM players WHERE player_id = ?",
+                           (lpf_only,)).fetchone()
+    assert row["team_id"] == team, "nu are id Transfermarkt, deci nu-l judecăm"
+
+
+def test_a_player_who_played_recently_is_not_detached(tmp_path):
+    """Plasa de siguranță: cine a jucat săptămâna trecută e la club."""
+    import datetime as _dt
+    db = _Database(tmp_path / "recent.db")
+    team = db.upsert_team("FCSB", source="test")
+    other = db.upsert_player("Ion Pop", team, source="transfermarkt", ext_id="1")
+    recent = db.upsert_player("Meriton Korenica", team,
+                              source="transfermarkt", ext_id="2")
+    ieri = (_dt.date.today() - _dt.timedelta(days=1)).isoformat()
+    _played(db, recent, team, ieri)
+
+    db.detach_missing_players(team, [other])
+    with db.connect() as conn:
+        row = conn.execute("SELECT team_id FROM players WHERE player_id = ?",
+                           (recent,)).fetchone()
+    assert row["team_id"] == team
+
+
+def test_a_known_player_who_stopped_playing_is_detached(tmp_path):
+    """Cazul pentru care exista mecanismul: chiar a plecat."""
+    import datetime as _dt
+    db = _Database(tmp_path / "plecat_real.db")
+    team = db.upsert_team("FCSB", source="test")
+    stays = db.upsert_player("Ion Pop", team, source="transfermarkt", ext_id="1")
+    left = db.upsert_player("Vasile Ene", team, source="transfermarkt",
+                            ext_id="2")
+    demult = (_dt.date.today() - _dt.timedelta(days=120)).isoformat()
+    _played(db, left, team, demult)
+
+    assert db.detach_missing_players(team, [stays]) == 1
+    with db.connect() as conn:
+        row = conn.execute("SELECT team_id FROM players WHERE player_id = ?",
+                           (left,)).fetchone()
+    assert row["team_id"] is None
+
+
+# ----------------------------------------------------------------------
+# Transferuri in timpul sezonului
+#
+# LPF vede jucatorul in formatia clubului nou, dar el e inregistrat la cel
+# vechi, deci nu se potriveste cu nimeni si se crea un rand nou. Asa au iesit
+# doi Korenica - unul la CFR Cluj, unul la FCSB - cu istoricul rupt in doua.
+# ----------------------------------------------------------------------
+def test_a_transferred_player_is_found_at_his_old_club(tmp_path):
+    db = _Database(tmp_path / "transfer.db")
+    cfr = db.upsert_team("CFR Cluj", source="test")
+    fcsb = db.upsert_team("FCSB", source="test")
+    pid = db.upsert_player("Meriton Korenica", cfr, source="test")
+
+    assert db.player_at_other_team("Meriton Korenica", fcsb) == pid
+
+
+def test_diacritics_do_not_hide_him(tmp_path):
+    db = _Database(tmp_path / "diacritice.db")
+    cfr = db.upsert_team("CFR Cluj", source="test")
+    fcsb = db.upsert_team("FCSB", source="test")
+    pid = db.upsert_player("Ștefan Bîrligea", cfr, source="test")
+    assert db.player_at_other_team("Stefan Birligea", fcsb) == pid
+
+
+def test_a_player_already_at_the_team_is_not_returned(tmp_path):
+    db = _Database(tmp_path / "acelasi.db")
+    fcsb = db.upsert_team("FCSB", source="test")
+    db.upsert_player("Ion Pop", fcsb, source="test")
+    assert db.player_at_other_team("Ion Pop", fcsb) is None
+
+
+def test_two_players_with_the_same_name_are_left_alone(tmp_path):
+    """La o cautare in toata liga, ambiguitatea inseamna «nu stiu»."""
+    db = _Database(tmp_path / "omonimi.db")
+    a = db.upsert_team("CFR Cluj", source="test")
+    b = db.upsert_team("Rapid Bucuresti", source="test")
+    fcsb = db.upsert_team("FCSB", source="test")
+    db.upsert_player("Ion Pop", a, source="test")
+    db.upsert_player("Ion Pop", b, source="test")
+    assert db.player_at_other_team("Ion Pop", fcsb) is None
+
+
+def test_moving_a_player_keeps_his_history(tmp_path):
+    db = _Database(tmp_path / "mutare.db")
+    cfr = db.upsert_team("CFR Cluj", source="test")
+    fcsb = db.upsert_team("FCSB", source="test")
+    pid = db.upsert_player("Meriton Korenica", cfr, source="test")
+    _played(db, pid, cfr, "2026-08-01")
+
+    db.move_player(pid, fcsb)
+    with db.connect() as conn:
+        assert conn.execute("SELECT team_id FROM players WHERE player_id=?",
+                            (pid,)).fetchone()["team_id"] == fcsb
+        assert conn.execute("SELECT COUNT(*) c FROM player_match_stats"
+                            " WHERE player_id=?", (pid,)).fetchone()["c"] == 1
+
+
+def test_merging_two_records_joins_the_history(tmp_path):
+    db = _Database(tmp_path / "unire.db")
+    cfr = db.upsert_team("CFR Cluj", source="test")
+    fcsb = db.upsert_team("FCSB", source="test")
+    vechi = db.upsert_player("Meriton Korenica", cfr, source="test", ext_id="k")
+    nou = db.upsert_player("Meriton Korenica", fcsb, source="lpf", ext_id="k2")
+    _played(db, vechi, cfr, "2026-08-01")
+    _played(db, nou, fcsb, "2026-09-05")
+
+    db.merge_players(vechi, nou)
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) c FROM players"
+                            " WHERE name='Meriton Korenica'").fetchone()["c"] == 1
+        assert conn.execute("SELECT COUNT(*) c FROM player_match_stats"
+                            " WHERE player_id=?", (vechi,)).fetchone()["c"] == 2

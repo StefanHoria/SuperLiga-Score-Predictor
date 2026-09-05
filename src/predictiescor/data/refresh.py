@@ -312,8 +312,13 @@ def run_refresh(
             # singurul mod in care vom putea vreodata masura daca absentele
             # ajuta modelul: peste cateva luni avem istoric, acum nu avem.
             db.snapshot_availability(source=provider.name)
+            # Jucatorii pe care Transfermarkt nu-i cunoaste (adusi de LPF, cu
+            # numele legal complet) isi iau clubul din ultima aparitie.
+            mutati = db.sync_teams_from_appearances(source=provider.name)
             return (f"{len(clubs)} cluburi, {written} jucători, "
-                    f"{absent} indisponibili (fotografiați)")
+                    f"{absent} indisponibili (fotografiați)"
+                    + (f", {mutati} cluburi corectate după apariții"
+                       if mutati else ""))
 
         record("Loturi și jucători", players)
 

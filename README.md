@@ -1041,6 +1041,35 @@ anula. Nu șterge nimic.
 Conflictele se văd pe pagina **Jucători → Absenți**, cu propoziția din articol,
 ca să le poți verifica. Nu ascundem dezacordul, îl arătăm.
 
+### Cine poate fi scos din lot
+
+Prima versiune scotea pe oricine lipsea de pe pagina Transfermarkt. Greșit:
+jucătorii aduși de LPF au numele legal complet („Manuel Alberto Cunha Lopes"),
+iar Transfermarkt folosește nume scurte — nu se potrivesc niciodată. Așa au
+ajuns „fără club" **16 jucători care jucaseră cu o zi înainte**, printre care
+Korenica, Heras Garcia și Zandbergen.
+
+Două gărzi acum:
+
+* se judecă **doar jucătorii pe care sursa îi cunoaște** (au id Transfermarkt);
+  absența celorlalți de pe pagină nu înseamnă nimic;
+* nimeni care **a jucat în ultimele 30 de zile** nu e scos — cine a fost pe
+  teren săptămâna trecută e la club.
+
+### Transferuri în timpul sezonului
+
+LPF vedea jucătorul în formația clubului nou, nu-l găsea în lotul acelui club
+și crea un rând nou. Rezultatul: **doi Korenica**, unul la CFR Cluj și unul la
+FCSB, cu istoricul rupt în două. Acum, înainte de a crea un rând, se caută
+jucătorul la celelalte echipe — potrivire exactă pe nume, ca să nu unim oameni
+diferiți — și se mută.
+
+**Limitare rămasă:** modelul de marcatori grupează aparițiile pe `(jucător,
+echipă)`, deci după un transfer jucătorul repornește de la zero la clubul nou.
+Korenica are 418 minute, dar doar 45 la FCSB — sub pragul de 270, deci nu apare
+în predicțiile FCSB până nu adună destule. Ratele lui de la CFR rămân
+nefolosite, deși golurile pe 90 de minute sunt o însușire a lui, nu a echipei.
+
 ### Și cine chiar a plecat din ligă
 
 Separat: `upsert_player` muta un jucător când îl găsea la alt club **din ligă**,
