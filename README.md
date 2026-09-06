@@ -50,6 +50,7 @@ Se deschide în browser pe `http://localhost:8501`.
 | **Bilete** | Generare, verificare, acuratețe, învățare, surprize |
 | **Live** | Scorul meciurilor în desfășurare, cu șansele recalculate pe loc și starea ponturilor tale |
 | **Știri** | Absențe, reveniri și transferuri citite din presă, cu propoziția-dovadă lângă fiecare |
+| **Transferuri** | Veniri și plecări pe club, cu sumele plătite și încasate, și profitul rezultat |
 
 ---
 
@@ -849,6 +850,7 @@ PredictieScor/
     │   ├── flashscoreodds.py      cote pre-meci de la 5 case
     │   ├── news.py                fluxuri RSS din presa sportivă
     │   ├── newsfacts.py           text liber → fapte, cu nivel de încredere
+    │   ├── transfers.py           veniri, plecări și sumele lor
     │   ├── lpf.py                 sursa oficială a ligii
     │   └── refresh.py             pașii de actualizare (buton + terminal)
     ├── modeling/
@@ -1096,6 +1098,72 @@ e în el se detașează (`team_id` devine NULL). Jucătorul **nu** se șterge:
 aparițiile lui din meciurile trecute rămân, și e corect să rămână.
 
 ---
+
+## Transferuri, cu bani cu tot
+
+Pagina de transferuri a fiecărui club de la Transfermarkt are două tabele —
+veniri și plecări — și, spre deosebire de presă, **publică sumele**. Se aduc la
+actualizarea completă, o dată pe club, și ajung în tabelul `transfers`.
+
+Sezonul curent: **581 de transferuri la 16 cluburi**, 9.34 mil. € plătiți și
+18.21 mil. € încasați în toată liga.
+
+### Gratis și nepublicată nu sunt același lucru
+
+Cea mai ușoară greșeală de făcut aici e să pui pe zero o sumă care lipsește.
+Un club care și-a vândut jucătorii pe sume nedezvăluite ar apărea atunci că i-a
+dat degeaba — și bilanțul lui ar minți.
+
+Deci `0.0` înseamnă **gratis, și se știe** („free transfer", „loan transfer"),
+iar `None` înseamnă **nu s-a publicat** („?"). Numai primele intră în profit;
+celelalte sunt numărate separat și scrise pe pagină, ca să știi cât de completă
+e socoteala: **442 gratis, 96 nepublicate, 190 împrumuturi**.
+
+Formele pe care le înțelege parserul:
+
+| cum scrie sursa | ce înseamnă |
+|---|---|
+| `€1.00m`, `€600k` | suma, în euro |
+| `free transfer` | gratis, cunoscut → `0` |
+| `Loan fee: €1.50m` | împrumut **cu taxă** → suma, marcat împrumut |
+| `loan transfer` | împrumut fără taxă → `0` |
+| `?` | nepublicată → `None` |
+
+Pe pagină, tabelul „cele mai scumpe mutări" păstrează o coloană cu **textul
+original al sursei**, ca interpretarea să poată fi verificată fără să deschizi
+Transfermarkt.
+
+### Capul tabelului spune care e care
+
+Nu poziția tabelului în pagină, ci antetul: coloana **„Left"** înseamnă *de
+unde a venit* — deci tabelul de **veniri**; **„Joined"** înseamnă *unde a
+plecat*. Invers de cum sună.
+
+### Bilanțul, pe cluburi
+
+|  | plătit | încasat | profit |
+|---|---|---|---|
+| FCSB | 1.70 mil. € | 5.10 mil. € | **+3.40 mil. €** |
+| Rapid București | 0.35 mil. € | 2.90 mil. € | +2.55 mil. € |
+| Farul Constanța | 0 | 2.30 mil. € | +2.30 mil. € |
+| … | | | |
+| Universitatea Craiova | 5.90 mil. € | 3.10 mil. € | **−2.80 mil. €** |
+
+### O sursă mai bună decât presa pentru plecări
+
+Efectul lateral util: transferurile spun cine a plecat **cu bani cu tot**, mai
+devreme și mai sigur decât presa. Cazul care a pornit toată treaba — Daniel
+Bîrligea era arătat în continuare la FCSB, deși plecase de o săptămână — se
+rezolvă acum singur: rândul „FCSB → Frosinone, Loan fee: €1.50m" e destul.
+
+Sunt puse în `departed_players()` cu două gărzi, ambele necesare:
+
+* rândurile **„End of loan"** nu sunt plecări — sunt întoarceri la clubul
+  proprietar, uneori cu dată în viitor (așa au fost păstrați Garita și
+  Dumbravanu);
+* nimeni care **a jucat în ultimele 30 de zile** nu e scos, orice ar scrie
+  tabelul (așa a rămas Korenica, transferat dar prezent pe teren).
+
 
 ## Absențele: le colectăm, dar modelul nu le vede (încă)
 

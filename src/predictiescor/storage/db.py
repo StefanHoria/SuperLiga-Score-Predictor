@@ -849,6 +849,27 @@ class Database:
                -- si cei marcati de mana: uneori omul stie inaintea surselor
                OR EXISTS (SELECT 1 FROM manual_departures d
                            WHERE d.player_id = p.player_id)
+               -- Pagina de transferuri e cea mai buna sursa: e explicita, are
+               -- si suma, si apare acolo inaintea actualizarii lotului.
+               -- Birligea figura in lot la FCSB, dar in tabelul de plecari era
+               -- deja trecut la Frosinone.
+               OR EXISTS (SELECT 1 FROM transfers tr
+                           WHERE tr.direction = 'plecare'
+                             AND tr.team_id = p.team_id
+                             AND tr.player_name = p.name
+                             -- "End of loan 31/12/2026" e un imprumut care se
+                             -- INCHEIE mai tarziu: jucatorul e inca acolo.
+                             AND LOWER(COALESCE(tr.fee_text, ''))
+                                 NOT LIKE 'end of loan%'
+                             -- si, ca la detasare: cine a jucat saptamana
+                             -- trecuta pentru echipa aia n-a plecat
+                             AND NOT EXISTS (
+                                   SELECT 1 FROM player_match_stats ps
+                                   JOIN matches m ON m.match_id = ps.match_id
+                                   WHERE ps.player_id = p.player_id
+                                     AND ps.team_id = p.team_id
+                                     AND ps.minutes > 0
+                                     AND m.utc_date >= datetime('now', '-30 days')))
         """
         with self.connect() as conn:
             return {str(r["name"]) for r in conn.execute(sql) if r["name"]}
@@ -924,6 +945,76 @@ class Database:
         keep = [not _is_destination(str(r.dovada or ""), str(r.echipa))
                 for r in frame.itertuples()]
         return frame[keep].reset_index(drop=True)
+
+    # ------------------------------------------------------------------
+    # Transferuri
+    # ------------------------------------------------------------------
+    def upsert_transfers(self, season: int, team_id: int,
+                         rows: Iterable[Any]) -> int:
+        """Rescrie transferurile unui club pentru un sezon.
+
+        Se sterge si se rescrie: un transfer anulat sau corectat de sursa
+        trebuie sa dispara, nu sa ramana pe veci.
+        """
+        rows = list(rows)
+        now = _utcnow()
+        with self.connect() as conn:
+            conn.execute("DELETE FROM transfers WHERE season=? AND team_id=?",
+                         (int(season), int(team_id)))
+            conn.executemany(
+                "INSERT OR REPLACE INTO transfers(season, team_id, direction,"
+                " player_name, position, age, other_club, other_league,"
+                " fee_eur, fee_text, is_loan, updated_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                [(int(season), int(team_id), t.direction, t.player_name,
+                  t.position, t.age, t.other_club, t.other_league,
+                  t.fee_eur, t.fee_text, int(t.is_loan), now) for t in rows])
+        return len(rows)
+
+    def transfers_df(self, season: int | None = None) -> pd.DataFrame:
+        """Toate transferurile, cu numele echipei."""
+        sql = """
+            SELECT t.*, e.name AS echipa
+            FROM transfers t JOIN teams e ON e.team_id = t.team_id
+        """
+        params: list[Any] = []
+        if season is not None:
+            sql += " WHERE t.season = ?"
+            params.append(int(season))
+        sql += " ORDER BY e.name, t.direction, t.fee_eur DESC"
+        with self.connect() as conn:
+            return pd.read_sql_query(sql, conn, params=params)
+
+    def transfer_balance(self, season: int | None = None) -> pd.DataFrame:
+        """Bilantul pe club: incasat, platit, profit.
+
+        Sumele nepublicate se numara separat, nu ca zero: altfel un club care
+        si-a vandut jucatorii pe sume nedezvaluite ar parea ca i-a dat degeaba.
+        """
+        frame = self.transfers_df(season)
+        if frame.empty:
+            return frame
+
+        def _side(group: pd.DataFrame, direction: str) -> float:
+            side = group[group["direction"] == direction]
+            return float(side["fee_eur"].fillna(0.0).sum())
+
+        rows = []
+        for echipa, group in frame.groupby("echipa"):
+            incasat = _side(group, "plecare")
+            platit = _side(group, "venire")
+            rows.append({
+                "echipă": echipa,
+                "veniri": int((group["direction"] == "venire").sum()),
+                "plecări": int((group["direction"] == "plecare").sum()),
+                "plătit": platit,
+                "încasat": incasat,
+                "profit": incasat - platit,
+                "împrumuturi": int(group["is_loan"].sum()),
+                "sume nepublicate": int(group["fee_eur"].isna().sum()),
+            })
+        return (pd.DataFrame(rows).sort_values("profit", ascending=False)
+                .reset_index(drop=True))
 
     def current_squads(self) -> dict[str, str]:
         """La ce echipa e ACUM fiecare jucator: {nume jucator: nume echipa}.

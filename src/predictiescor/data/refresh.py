@@ -296,11 +296,17 @@ def run_refresh(
             clubs = provider.fetch_clubs(season)
             written = 0
             absent = 0
+            transferuri = 0
             for name, club_id, slug in clubs:
                 team_id = db.upsert_team(name, source=provider.name,
                                          ext_id=club_id)
                 written += provider.fetch_club_players(
                     club_id, slug, season, team_id, fresh=True)
+                try:
+                    transferuri += provider.fetch_club_transfers(
+                        club_id, slug, season, team_id, fresh=True)
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("transferuri %s: %s", name, exc)
                 # Absentele nu se aduceau deloc din refresh - se actualizau doar
                 # la ingestia completa a sezonului, deci ramaneau vechi.
                 try:
@@ -316,7 +322,8 @@ def run_refresh(
             # numele legal complet) isi iau clubul din ultima aparitie.
             mutati = db.sync_teams_from_appearances(source=provider.name)
             return (f"{len(clubs)} cluburi, {written} jucători, "
-                    f"{absent} indisponibili (fotografiați)"
+                    f"{absent} indisponibili (fotografiați), "
+                    f"{transferuri} transferuri"
                     + (f", {mutati} cluburi corectate după apariții"
                        if mutati else ""))
 

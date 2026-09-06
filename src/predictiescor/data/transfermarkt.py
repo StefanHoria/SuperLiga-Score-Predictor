@@ -302,6 +302,22 @@ class TransfermarktProvider(DataProvider):
             )
 
     # ------------------------------------------------------------------
+    # Transferuri
+    # ------------------------------------------------------------------
+    def fetch_club_transfers(self, club_id: str, slug: str, season: int,
+                             team_id: int, *, fresh: bool = False) -> int:
+        """Veniri si plecari cu sume, de pe pagina de transferuri a clubului."""
+        from .transfers import parse_transfers
+
+        url = f"{BASE}/{slug}/transfers/verein/{club_id}/saison_id/{season}"
+        html = self.http.get_text(url, ttl_hours=0 if fresh else 12,
+                                  use_cache=not fresh)
+        rows = parse_transfers(html)
+        if not rows:
+            return 0
+        return self.db.upsert_transfers(season, team_id, rows)
+
+    # ------------------------------------------------------------------
     # Absente: accidentari si suspendari
     # ------------------------------------------------------------------
     def fetch_absences(self, club_id: str, slug: str, team_id: int) -> int:

@@ -393,6 +393,32 @@ CREATE INDEX IF NOT EXISTS idx_news_facts_kind
 CREATE INDEX IF NOT EXISTS idx_news_facts_player ON news_facts(player_id);
 
 -- ------------------------------------------------------------------
+-- Transferuri
+-- ------------------------------------------------------------------
+-- Veniri si plecari, cu sumele. Sursa e pagina de transferuri a clubului de la
+-- Transfermarkt, singura care publica si banii.
+--
+-- `fee_eur` e in euro, sau NULL cand suma nu e publica ("?"). Transferurile
+-- libere au 0, nu NULL: sunt doua lucruri diferite - "gratis" si "nu se stie".
+CREATE TABLE IF NOT EXISTS transfers (
+    season      INTEGER NOT NULL,
+    team_id     INTEGER NOT NULL REFERENCES teams(team_id) ON DELETE CASCADE,
+    direction   TEXT NOT NULL,          -- venire | plecare
+    player_name TEXT NOT NULL,
+    position    TEXT,
+    age         INTEGER,
+    other_club  TEXT,                   -- de unde vine / unde pleaca
+    other_league TEXT,
+    fee_eur     REAL,
+    fee_text    TEXT,                   -- textul original, ca sa fie verificabil
+    is_loan     INTEGER NOT NULL DEFAULT 0,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (season, team_id, direction, player_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_transfers_team ON transfers(team_id, season);
+
+-- ------------------------------------------------------------------
 -- Ce stie omul si sursele nu
 -- ------------------------------------------------------------------
 -- Transfermarkt isi actualizeaza loturile cu intarziere, iar presa nu scrie
