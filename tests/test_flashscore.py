@@ -8,7 +8,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import numpy as np
 import pytest
 
-from predictiescor.data.flashscore import _deduplicate, parse_feed
+from predictiescor.data.flashscore import (
+    _deduplicate, _live_minute, _parse_fields, parse_feed,
+)
 
 # Fragment cu structura reala: doua meciuri, unul incheiat si unul programat,
 # plus o repetare (feed-ul listeaza acelasi meci in mai multe sectiuni).
@@ -20,9 +22,19 @@ FEED = (
     "~AA÷abc123¬AD÷1788112800¬CX÷FCSB¬AF÷UTA Arad¬AG÷1¬AH÷3¬AB÷3¬ER÷Runda 7¬"
 )
 
+#: Un meci in desfasurare, cu campurile ca in feed-ul real: `AB÷2` e starea
+#: live, iar `AO` e momentul in care a pornit ceasul reprizei - nu finalul
+#: meciului, cum s-a crezut la inceput. Start 18:00 UTC, ceasul pornit la
+#: 18:01:39.
 LIVE_FEED = (
     "~AA÷xyz789¬AD÷1788112800¬CX÷Dinamo București¬AF÷FCSB¬AG÷2¬AH÷1"
-    "¬AB÷2¬AC÷67¬ER÷Runda 8¬"
+    "¬AB÷2¬AC÷12¬AO÷1788112899¬ER÷Runda 8¬"
+)
+
+#: Acelasi meci in repriza a doua: ceasul a pornit la 18:47.
+LIVE_SECOND_HALF = (
+    "~AA÷xyz789¬AD÷1788112800¬CX÷Dinamo București¬AF÷FCSB¬AG÷2¬AH÷1"
+    "¬AB÷2¬AO÷1788115620¬ER÷Runda 8¬"
 )
 
 
@@ -54,17 +66,55 @@ def test_timestamps_are_utc():
 
 
 def test_detects_live_match():
-    """Codul de stare 'live' nu a putut fi confirmat direct, deci regula e:
-    nici programat, nici incheiat, dar cu scor => se joaca."""
+    """`AB÷2` e starea de meci in desfasurare - confirmata pe feed-ul real."""
     game = parse_feed(LIVE_FEED)[0]
     assert game.is_live
     assert game.score == "2-1"
-    assert game.minute == 67
+
+
+def test_a_live_match_is_not_read_as_finished():
+    """`AO` apare si la meciurile in desfasurare.
+
+    Citit ca semn de meci incheiat, facea meciul in curs sa dispara din pagina
+    de Live: Craiova - „U" Cluj se juca, iar aplicatia scria „niciun meci in
+    desfasurare".
+    """
+    assert parse_feed(LIVE_FEED)[0].state == "live"
+
+
+def test_the_minute_comes_from_the_clock_not_from_the_status_code():
+    """`AC` e un cod de stare, nu un minut: arata 12 in minutul 67."""
+    fields = _parse_fields(LIVE_FEED.split("~AA÷")[1])
+    assert _live_minute(fields, now=1788116859) == 67
+
+
+def test_the_second_half_adds_forty_five_minutes():
+    fields = _parse_fields(LIVE_SECOND_HALF.split("~AA÷")[1])
+    assert _live_minute(fields, now=1788116220) == 56
+
+
+def test_no_clock_means_no_minute():
+    """Mai bine fara minut decat cu unul inventat."""
+    assert _live_minute({"AD": "1788112800"}) is None
 
 
 def test_unknown_status_with_score_counts_as_live():
-    feed = LIVE_FEED.replace("¬AB÷2¬", "¬AB÷9¬")
-    assert parse_feed(feed)[0].is_live, "un cod nou nu trebuie sa strice nimic"
+    """Un cod de stare nou nu trebuie sa strice nimic."""
+    feed = LIVE_FEED.replace("¬AB÷9¬", "¬AB÷9¬").replace("¬AB÷2¬", "¬AB÷9¬")
+    assert parse_feed(feed)[0].is_live
+
+
+def test_unknown_status_long_after_kickoff_counts_as_finished():
+    """La doua ore dupa start, orice meci s-a terminat.
+
+    `AO` e ultima schimbare de stare: la ~2 minute dupa start inseamna ca a
+    pornit ceasul, la ~112 minute inseamna fluierul final. Fara distinctia
+    asta, un rezultat cu cod necunoscut ar fi citit ca meci in desfasurare si
+    nu s-ar mai scrie in baza.
+    """
+    feed = (LIVE_FEED.replace("¬AB÷2¬", "¬AB÷9¬")
+                     .replace("¬AO÷1788112899¬", "¬AO÷1788119520¬"))
+    assert parse_feed(feed)[0].is_finished
 
 
 def test_deduplicates_repeated_matches():

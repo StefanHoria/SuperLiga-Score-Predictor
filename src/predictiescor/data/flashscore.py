@@ -39,12 +39,30 @@ log = logging.getLogger(__name__)
 
 FEED_URL = "https://www.flashscore.ro/fotbal/romania/superliga/"
 
+#: Feed-ul incorporat in pagina NU contine meciul care se joaca chiar acum:
+#: pagina il aduce separat, din endpoint-ul de mai jos, cu JavaScript. De aceea
+#: „Niciun meci in desfasurare" aparea si cand era unul - sursa citita de noi
+#: n-avea de unde sa stie. `{key}` e perechea turneu_sezon (ex. 157_GILi6JC9),
+#: citita din pagina, ca sa nu ramana infipta in cod cand se schimba sezonul.
+LIVE_FEED_URL = "https://9.flashscore.ninja/9/x/feed/t_1_{key}_3_ro_1"
+
+#: Fara antetul asta endpoint-ul raspunde 401. E o valoare fixa a site-ului,
+#: nu un token de utilizator - aceeasi pentru oricine deschide pagina.
+LIVE_FEED_HEADERS = {"x-fsign": "SW9D1eZo"}
+
+#: perechea turneu_sezon, asa cum o scrie feed-ul in antetul lui
+_FEED_KEY_RE = re.compile(r"ZH÷(\w+_\w+)")
+
 #: starile pe care le-am putut confirma direct din feed
 STATUS_SCHEDULED = "1"
+STATUS_LIVE = "2"
 STATUS_FINISHED = "3"
 
-#: campurile din care incercam sa citim minutul curent, in ordine
-MINUTE_FIELDS = ("AC", "AM", "BA", "AL")
+#: Reperele dupa care se decide in ce repriza suntem. `AO` e momentul in care a
+#: pornit ceasul reprizei curente, nu finalul meciului - de aici si confuzia de
+#: mai jos, care marca meciurile live drept incheiate.
+_SECOND_HALF_AFTER = 40 * 60   # secunde de la start pana la repriza a doua
+_MATCH_IS_OVER_AFTER = 100 * 60  # dupa atata, meciul s-a incheiat sigur
 
 
 @dataclass
@@ -116,12 +134,20 @@ def parse_feed(html: str) -> list[LiveMatch]:
         away_goals = _as_int(fields.get("AH"))
         status = str(fields.get("AB") or "").strip()
 
-        if status == STATUS_FINISHED or fields.get("AO"):
+        # `AB` e autoritar cand il intelegem. Inainte se citea si `AO` ca semn
+        # de meci incheiat, dar `AO` apare si la meciurile in desfasurare (e
+        # startul reprizei curente), deci un meci live era dat drept terminat -
+        # si disparea din pagina de Live.
+        if status == STATUS_FINISHED:
             state = "incheiat"
-        elif status == STATUS_SCHEDULED and home_goals is None:
+        elif status == STATUS_LIVE:
+            state = "live"
+        elif status == STATUS_SCHEDULED:
             state = "programat"
+        elif _looks_over(fields):
+            state = "incheiat"
         elif home_goals is not None:
-            # nici programat, nici incheiat, dar are scor => se joaca
+            # stare necunoscuta, dar are scor => se joaca
             state = "live"
         else:
             state = "programat"
@@ -136,22 +162,57 @@ def parse_feed(html: str) -> list[LiveMatch]:
             ht_home_goals=_as_int(fields.get("BC")),
             ht_away_goals=_as_int(fields.get("BD")),
             state=state,
-            minute=_extract_minute(fields) if state == "live" else None,
+            minute=_live_minute(fields) if state == "live" else None,
             round=fields.get("ER") or None,
         ))
     return matches
 
 
-def _extract_minute(fields: dict[str, str]) -> int | None:
-    """Minutul curent, daca feed-ul il publica intr-unul din campurile stiute."""
-    for key in MINUTE_FIELDS:
-        raw = str(fields.get(key) or "")
-        match = re.search(r"\b(\d{1,3})\b", raw)
-        if match:
-            minute = int(match.group(1))
-            if 0 < minute <= 130:
-                return minute
-    return None
+def _looks_over(fields: dict[str, str]) -> bool:
+    """Meciul pare terminat, judecand doar dupa ceas.
+
+    Se foloseste numai cand codul de stare e unul pe care nu-l cunoastem.
+    `AO` e ultima schimbare de stare: la un meci incheiat e fluierul final
+    (masurat: la ~112 minute dupa start), la unul in desfasurare e pornirea
+    ceasului reprizei (la ~2 minute). Peste doua ore de la ora de start, orice
+    meci de fotbal s-a terminat.
+    """
+    started = _as_int(fields.get("AO"))
+    kickoff = _as_int(fields.get("AD"))
+    if started is None:
+        return False
+    if kickoff is None:
+        return True
+    return started - kickoff > _MATCH_IS_OVER_AFTER
+
+
+def _live_minute(fields: dict[str, str], *, now: float | None = None
+                 ) -> int | None:
+    """Minutul curent, socotit din momentul in care a pornit ceasul.
+
+    Feed-ul nu publica minutul ca numar; il calculeaza si site-ul, din `AO` -
+    startul reprizei curente. Repriza se deduce din distanta fata de ora de
+    start: daca ceasul a pornit la cateva minute dupa fluierul de incepere,
+    suntem in prima repriza; daca a pornit mult mai tarziu, in a doua, si
+    atunci se adauga cele 45 de minute.
+
+    Prima versiune citea `AC`, care e un cod de stare, nu un minut: la Craiova
+    - „U" Cluj scria 12 in minutul 24.
+    """
+    started = _as_int(fields.get("AO"))
+    kickoff = _as_int(fields.get("AD"))
+    if started is None:
+        return None
+
+    now = datetime.now(timezone.utc).timestamp() if now is None else now
+    elapsed = (now - started) / 60.0
+    if elapsed < 0:
+        return None
+
+    if kickoff is not None and started - kickoff >= _SECOND_HALF_AFTER:
+        elapsed += 45
+    minute = int(elapsed) + 1
+    return minute if 0 < minute <= 130 else None
 
 
 def _information(match: LiveMatch) -> int:
@@ -206,9 +267,53 @@ class FlashscoreProvider(DataProvider):
                 "(formatul paginii s-a schimbat?)")
         return _deduplicate(matches)
 
+    def fetch_live_feed(self) -> list[LiveMatch]:
+        """Meciurile din feed-ul de live - singurul care le contine pe cele
+
+        in desfasurare. Se cere cheia turneului din pagina, deci o citire in
+        plus; e ieftina si tine URL-ul valabil cand se schimba sezonul.
+        """
+        page = self.http.get_text(FEED_URL, ttl_hours=0, use_cache=False)
+        found = _FEED_KEY_RE.search(page)
+        if not found:
+            raise RuntimeError(
+                "nu am gasit cheia turneului in pagina Flashscore "
+                "(formatul s-a schimbat?)")
+        raw = self.http.get_text(
+            LIVE_FEED_URL.format(key=found.group(1)),
+            ttl_hours=0, use_cache=False, extra_headers=LIVE_FEED_HEADERS)
+        return _deduplicate(parse_feed(raw))
+
+    def fetch_feed_with_live(self) -> list[LiveMatch]:
+        """Programul intreg, plus meciurile care se joaca chiar acum.
+
+        Feed-ul din pagina are tot sezonul, dar nu si meciul in desfasurare;
+        cel de live are meciul, dar nu si restul programului. Amandoua, deci.
+        Randurile care se repeta trec prin aceeasi alegere ca de obicei: se
+        pastreaza cel cu mai multe informatii.
+        """
+        season = self.fetch_feed()
+        try:
+            live = self.fetch_live_feed()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("feed-ul de live n-a raspuns (%s); "
+                        "raman doar meciurile din pagina", exc)
+            return season
+        return _deduplicate(season + live)
+
     def live_matches(self) -> list[LiveMatch]:
-        """Doar meciurile in desfasurare acum."""
-        return [m for m in self.fetch_feed() if m.is_live]
+        """Doar meciurile in desfasurare acum.
+
+        Se incearca intai feed-ul de live; daca nu raspunde, se cade pe cel
+        incorporat in pagina, care nu are meciurile in curs, dar macar nu lasa
+        aplicatia fara nimic.
+        """
+        try:
+            return [m for m in self.fetch_live_feed() if m.is_live]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("feed-ul de live n-a raspuns (%s); "
+                        "incerc feed-ul din pagina", exc)
+            return [m for m in self.fetch_feed() if m.is_live]
 
     # ------------------------------------------------------------------
     def ingest(self, matches: Iterable[LiveMatch], season: int) -> IngestResult:

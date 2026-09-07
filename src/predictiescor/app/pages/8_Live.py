@@ -53,7 +53,9 @@ if st.button("Reîmprospătează", type="primary"):
     st.cache_data.clear()
 
 try:
-    feed = provider.fetch_feed()
+    # Nu `fetch_feed`: feed-ul incorporat in pagina Flashscore nu contine
+    # meciul care se joaca acum, iar pagina asta tocmai despre el e.
+    feed = provider.fetch_feed_with_live()
 except Exception as exc:  # noqa: BLE001
     st.error(f"Nu am putut citi feed-ul: {exc}")
     st.stop()
@@ -151,7 +153,8 @@ if not live:
     st.stop()
 
 # ----------------------------------------------------------------------
-st.success(f"**{len(live)} meciuri în desfășurare**")
+st.success("**1 meci în desfășurare**" if len(live) == 1
+           else f"**{len(live)} meciuri în desfășurare**")
 
 for match in live:
     with st.container(border=True):
