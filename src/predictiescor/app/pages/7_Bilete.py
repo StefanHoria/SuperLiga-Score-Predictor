@@ -146,18 +146,31 @@ def _sectiunea_generare() -> None:
         for strategy in STRATEGIES:
             st.markdown(f"**{strategy.label}** — {strategy.description}")
 
+    # Cu „Etapa" sau „Următoarele meciuri programate", selecția se întinde pe
+    # mai multe zile, iar ziua din casetă poate fi una ale cărei meciuri s-au
+    # jucat deja. Biletul se pune atunci pe ziua primului meci din el, altfel
+    # ar apărea în istoric sub o zi cu care n-are nicio legătură.
+    ziua_biletelor = min(str(v)[:10] for v in matches["utc_date"])
+    if ziua_biletelor != day:
+        st.caption(f"Biletele se vor înregistra pe **{ziua_biletelor}**, ziua "
+                   f"primului meci din selecție.")
+
     if st.button("Generează bilete", type="primary"):
         generator = TicketGenerator(pipeline, db,
                                     calibrator=load_calibration(db), stake=stake)
-        tickets = generator.build(matches, count=int(count), match_day=day,
+        tickets = generator.build(matches, count=int(count),
+                                  match_day=ziua_biletelor,
                                   strategies=chosen)
         st.session_state["tickets"] = tickets
-        st.session_state["tickets_day"] = day
+        st.session_state["tickets_day"] = ziua_biletelor
 
     tickets = st.session_state.get("tickets", [])
-    if tickets and st.session_state.get("tickets_day") == day:
+    # Comparatia se face cu `ziua_biletelor`, adica exact ce s-a salvat la
+    # generare. Cu `day` (ziua din caseta), o selectie pe mai multe zile
+    # nu s-ar potrivi niciodata si biletele generate n-ar mai aparea.
+    if tickets and st.session_state.get("tickets_day") == ziua_biletelor:
         st.divider()
-        st.subheader(f"{len(tickets)} bilete pentru {day}")
+        st.subheader(f"{len(tickets)} bilete pentru {ziua_biletelor}")
 
         # o singură interogare pentru toate biletele
         mutari = moved_matches(db)
