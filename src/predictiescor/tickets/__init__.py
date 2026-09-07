@@ -1,8 +1,8 @@
 """Bilete de pariuri: generare, decontare, invatare si surprize."""
 from .generator import (
     Leg, STRATEGIES, STRATEGY_BY_NAME, Strategy, Ticket, TicketGenerator,
-    matches_in_range, matches_in_round, matches_on, next_match_days,
-    next_rounds, recent_match_days,
+    bettable, matches_in_range, matches_in_round, matches_on,
+    next_match_days, next_rounds, recent_match_days,
 )
 from .learning import (
     Calibrator, accuracy_report, learn_calibration, load_calibration,
@@ -20,7 +20,8 @@ from .surprises import (
 
 __all__ = [
     "Leg", "STRATEGIES", "STRATEGY_BY_NAME", "Strategy", "Ticket",
-    "TicketGenerator", "matches_on", "matches_in_range", "matches_in_round",
+    "TicketGenerator", "bettable", "matches_on", "matches_in_range",
+    "matches_in_round",
     "next_match_days", "next_rounds", "recent_match_days",
     "Calibrator", "accuracy_report", "learn_calibration", "load_calibration",
     "overall_summary", "strategy_performance", "update_strategy_weights",

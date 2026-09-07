@@ -420,19 +420,17 @@ def run_refresh(
 def _generate_next_tickets(db: Database, cfg: Config) -> str:
     from ..modeling.pipeline import PredictionPipeline
     from ..tickets import (
-        TicketGenerator, load_calibration, matches_on, next_match_days,
+        TicketGenerator, bettable, load_calibration, matches_on,
+        next_match_days,
     )
 
     # Prima zi care mai are meciuri care INCA NU AU INCEPUT. Ziua de azi apare
     # in lista chiar daca meciurile ei s-au disputat deja sau sunt in
     # desfasurare; un "pont" pe un meci intrat in minutul 65 nu e o predictie.
     
-    now = datetime.now(timezone.utc).isoformat()
     day, matches = None, None
     for candidate in next_match_days(db, 5):
-        upcoming = matches_on(db, candidate, include_finished=False)
-        if not upcoming.empty:
-            upcoming = upcoming[upcoming["utc_date"] > now]
+        upcoming = bettable(matches_on(db, candidate))
         if len(upcoming) >= 1:
             day, matches = candidate, upcoming
             break

@@ -374,12 +374,24 @@ class TicketGenerator:
     # ------------------------------------------------------------------
     def build(self, matches: pd.DataFrame, *, count: int = 8,
               match_day: str | None = None,
-              strategies: Iterable[str] | None = None) -> list[Ticket]:
-        """Genereaza pana la `count` bilete pentru meciurile date."""
+              strategies: Iterable[str] | None = None,
+              allow_started: bool = False) -> list[Ticket]:
+        """Genereaza pana la `count` bilete pentru meciurile date.
+
+        Meciurile incepute sunt scoase aici, ca sa nu depinda de tinerea de
+        minte a fiecarui apelant. `allow_started=True` e pentru backfill, care
+        genereaza dinadins pe zile trecute, cu modelul taiat inainte de ele.
+        """
         if matches.empty:
             return []
 
         day = match_day or str(matches.iloc[0]["utc_date"])[:10]
+        if not allow_started:
+            matches = bettable(matches)
+            if matches.empty:
+                log.info("niciun meci nemeceput pentru %s", day)
+                return []
+
         legs_by_match: dict[int, list[Leg]] = {}
         for _, match in matches.iterrows():
             candidates = self.candidate_legs(match)
@@ -561,6 +573,39 @@ class TicketGenerator:
         log.info("am salvat %d bilete pentru %s", len(ids),
                  tickets[0].match_day if tickets else "-")
         return ids
+
+
+# ----------------------------------------------------------------------
+def bettable(matches: pd.DataFrame) -> pd.DataFrame:
+    """Meciurile pe care chiar se mai poate paria.
+
+    Un pont pe un meci intrat in minutul 65 - sau terminat de doua ore - nu e o
+    predictie. Garda sta aici, nu la fiecare apelant, pentru ca a fost uitata
+    deja o data: `scripts/tickets.py` a generat opt bilete pe Voluntari - Arges
+    dupa fluierul final, iar ele s-ar fi decontat ca pariuri adevarate si ar fi
+    umflat acuratetea.
+
+    Trei conditii, fiecare prinzand altceva:
+
+    * **scorul** prinde meciurile terminate si notate;
+    * **statusul** prinde meciurile pe care sursa le-a inchis fara scor;
+    * **ora de start** prinde meciul inceput acum doua minute, despre care
+      nicio sursa n-a apucat inca sa spuna nimic.
+    """
+    if matches.empty:
+        return matches
+
+    keep = pd.Series(True, index=matches.index)
+    for column in ("home_goals", "away_goals"):
+        if column in matches.columns:
+            keep &= matches[column].isna()
+    if "status" in matches.columns:
+        keep &= matches["status"].fillna("scheduled").ne("finished")
+    if "utc_date" in matches.columns:
+        now = pd.Timestamp.now(tz="UTC")
+        kickoff = pd.to_datetime(matches["utc_date"], utc=True, errors="coerce")
+        keep &= kickoff.notna() & (kickoff > now)
+    return matches[keep].reset_index(drop=True)
 
 
 # ----------------------------------------------------------------------

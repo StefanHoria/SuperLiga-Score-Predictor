@@ -32,7 +32,8 @@ from predictiescor.storage.db import Database
 from predictiescor.utils.localtime import local_time  # noqa: E402
 from predictiescor.tickets import (  # noqa: E402
     TicketGenerator, accuracy_report, learn_calibration, load_calibration,
-    matches_on, next_match_days, overall_summary, recent_match_days,
+    bettable, matches_on, next_match_days, overall_summary,
+    recent_match_days,
     settle_tickets, strategy_performance, surprising_legs, tickets_frame,
     update_strategy_weights,
 )
@@ -74,10 +75,20 @@ def print_ticket(index: int, ticket) -> None:
 
 
 def generate(db, pipeline, day: str, count: int, stake: float) -> int:
-    matches = matches_on(db, day)
-    if matches.empty:
+    toate = matches_on(db, day)
+    if toate.empty:
         print(f"Nu sunt meciuri pe {day}.")
         return 0
+
+    # Ziua de azi are adesea si meciuri deja jucate. Nu se pariaza pe ele
+    # si nici nu se trec in lista de mai jos ca si cum s-ar putea.
+    matches = bettable(toate)
+    incepute = len(toate) - len(matches)
+    if matches.empty:
+        print(f"Toate cele {len(toate)} meciuri de pe {day} au inceput deja.")
+        return 0
+    if incepute:
+        print(f"({incepute} meciuri de pe {day} au inceput deja - sarite)")
 
     print(f"\n=== Bilete pentru {day} ({len(matches)} meciuri) ===")
     for row in matches.itertuples():
@@ -142,7 +153,10 @@ def backfill(db, days: int, count: int, stake: float) -> None:
             continue
         generator = TicketGenerator(pipeline, db,
                                     calibrator=load_calibration(db), stake=stake)
-        tickets = generator.build(matches, count=count, match_day=day)
+        # Backfill-ul genereaza dinadins pe zile trecute, cu modelul taiat
+        # inainte de ele; garda meciurilor incepute ar goli fiecare zi.
+        tickets = generator.build(matches, count=count, match_day=day,
+                                  allow_started=True)
         ids = generator.save(tickets)
         created += len(ids)
 

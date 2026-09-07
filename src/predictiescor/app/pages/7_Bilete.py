@@ -15,7 +15,8 @@ from common import (  # noqa: F401
 from predictiescor.storage.db import Database
 from predictiescor.tickets import (
     STRATEGIES, TicketGenerator, accuracy_report, learn_calibration,
-    legs_for_tickets, legs_frame, load_calibration, matches_in_range, matches_on,
+    bettable, legs_for_tickets, legs_frame, load_calibration,
+    matches_in_range, matches_on,
     next_match_days, overall_summary, recent_match_days, settle_tickets,
     strategy_calibration, strategy_performance, surprising_legs,
     surprising_results,
@@ -89,9 +90,10 @@ with tab_new:
             matches[column] = pd.NA
 
     # Pentru o zi din viitor, intervalul de ±3 zile prinde si meciuri deja
-    # jucate. Nu are rost sa pariem pe ele.
+    # jucate — si chiar ziua de azi poate avea un meci terminat la prânz si
+    # unul seara. Nu are rost sa pariem pe cele începute.
     if is_upcoming:
-        matches = matches[matches["home_goals"].isna()].reset_index(drop=True)
+        matches = bettable(matches)
 
     if matches.empty:
         st.info("Nu sunt meciuri de pariat în intervalul ales.")
