@@ -67,6 +67,18 @@ INGESTED_STATS = ("corners", "yellow_cards", "red_cards")
 #: Cate zile dupa meci se mai cer statisticile. Dupa atata, nu se mai schimba.
 STATS_RECHECK_DAYS = 7
 
+#: Arhiva unui sezon trecut. Pagina da `seasonId`-ul intern, iar feed-ul de
+#: rezultate se pagineaza cu el. Tiparul l-am luat din cererile pe care le face
+#: pagina la apasarea pe „Arata mai multe meciuri".
+ARCHIVE_URL = "https://www.flashscore.ro/fotbal/romania/superliga-{a}-{b}/rezultate/"
+ARCHIVE_FEED = ("https://9.flashscore.ninja/9/x/feed/"
+                "tr_1_{key}_{season_id}_{page}_3_ro_1")
+
+#: cate pagini incercam inainte sa ne oprim (o pagina are ~100 de meciuri)
+ARCHIVE_MAX_PAGES = 8
+
+_SEASON_ID_RE = re.compile(r"seasonId:\s*(\d+)")
+
 #: `SD` e un id numeric de statistica, stabil intre limbi - de aceea se
 #: potriveste dupa el, nu dupa numele romanesc, care se poate schimba.
 LIVE_STAT_IDS = {
@@ -368,6 +380,73 @@ class FlashscoreProvider(DataProvider):
             MATCH_STATS_URL.format(match=external_id),
             ttl_hours=0, use_cache=False, extra_headers=LIVE_FEED_HEADERS)
         return parse_match_stats(raw)
+
+    def fetch_archive(self, season: int) -> list[LiveMatch]:
+        """Meciurile unui sezon trecut, cu id-urile lor.
+
+        Feed-ul obisnuit acopera doar sezonul curent, deci fara asta nu putem
+        cere statisticile meciurilor vechi - iar 2025 nu are absolut nicio
+        statistica in baza.
+        """
+        page_url = ARCHIVE_URL.format(a=season, b=season + 1)
+        page = self.http.get_text(page_url, ttl_hours=24.0, use_cache=True)
+        season_id = _SEASON_ID_RE.search(page)
+        key = _FEED_KEY_RE.search(page)
+        if not season_id or not key:
+            raise RuntimeError(f"nu am gasit sezonul {season} in arhiva")
+
+        out: list[LiveMatch] = []
+        for index in range(ARCHIVE_MAX_PAGES):
+            raw = self.http.get_text(
+                ARCHIVE_FEED.format(key=key.group(1),
+                                    season_id=season_id.group(1), page=index),
+                ttl_hours=24.0, use_cache=True,
+                extra_headers=LIVE_FEED_HEADERS)
+            rows = parse_feed(raw)
+            if not rows:
+                break
+            out.extend(rows)
+        return _deduplicate(out)
+
+    def link_archive(self, season: int) -> int:
+        """Leaga meciurile din arhiva de cele din baza, dupa zi si echipe.
+
+        Potrivirea e pe ziua meciului plus perechea de echipe normalizate -
+        nu pe ora, fiindca sursele difera cu minute, si nu pe scor, fiindca
+        exact ce vrem sa verificam mai tarziu n-are voie sa decida potrivirea.
+        """
+        from ..utils.teamnames import canonical_team
+
+        with self.db.connect() as conn:
+            ours = {
+                (str(r["utc_date"])[:10], r["home"], r["away"]): int(r["match_id"])
+                for r in conn.execute(
+                    "SELECT m.match_id, m.utc_date, h.name AS home,"
+                    "       a.name AS away"
+                    " FROM matches m"
+                    " JOIN teams h ON h.team_id = m.home_team_id"
+                    " JOIN teams a ON a.team_id = m.away_team_id"
+                    " WHERE m.season = ? AND m.status = 'finished'", (season,))
+            }
+
+        linked = 0
+        with self.db.connect() as conn:
+            for match in self.fetch_archive(season):
+                if match.kickoff is None:
+                    continue
+                cheie = (match.kickoff.date().isoformat(),
+                         canonical_team(match.home), canonical_team(match.away))
+                match_id = ours.get(cheie)
+                if match_id is None:
+                    continue
+                conn.execute(
+                    "INSERT OR IGNORE INTO match_external_ids"
+                    "(match_id, source, ext_id) VALUES (?,?,?)",
+                    (match_id, self.name, match.external_id))
+                linked += 1
+        log.info("[%s] sezon %s: %d meciuri legate de arhiva",
+                 self.name, season, linked)
+        return linked
 
     def ingest_stats(self, season: int, *, full: bool = False) -> IngestResult:
         """Scrie cornerele si cartonasele meciurilor jucate.

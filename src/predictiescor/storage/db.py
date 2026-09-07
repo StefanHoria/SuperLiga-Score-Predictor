@@ -465,8 +465,15 @@ class Database:
         actualizare - cine scrie ultimul castiga - si s-ar strica tacut la
         prima reordonare.
         """
+        # Verificarea sta aici, nu in provideri: fiecare sursa are alt fel de
+        # a gresi, iar toate trec prin locul asta. O valoare imposibila se
+        # scrie ca „nu stiu", nu ca zero - vezi `data/validate.py`.
+        from ..data.validate import clean_team_stats
+        checked, _ = clean_team_stats(
+            {k: stats.get(k) for k in TEAM_STAT_COLUMNS}, source=source)
+
         deferred = {c for c in fill_only if c in TEAM_STAT_COLUMNS}
-        clean = {k: stats.get(k) for k in TEAM_STAT_COLUMNS}
+        clean = {k: checked.get(k) for k in TEAM_STAT_COLUMNS}
         cols = ["match_id", "team_id", "is_home", *TEAM_STAT_COLUMNS, "source"]
         vals = [match_id, team_id, int(is_home), *clean.values(), source]
         # COALESCE: un provider fara valoare nu sterge valoarea altui provider.

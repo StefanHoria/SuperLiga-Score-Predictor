@@ -6,11 +6,14 @@ import plotly.express as px
 import streamlit as st
 
 from common import (
-    data_version, load_matches, load_summary, load_team_stats, refresh_button,
-    run_data_refresh, season_label, setup_page, sidebar_footer,
+    data_version, load_matches, load_summary, load_team_stats, local_time,
+    refresh_button, run_data_refresh, season_label, setup_page, sidebar_footer,
 )
 from predictiescor.config import get_config
 from predictiescor.data.aggregator import DataAggregator
+from predictiescor.data.validate import (
+    implausible_rows, missing_columns,
+)
 from predictiescor.storage.db import Database
 from predictiescor.utils.teamnames import unknown_teams
 
@@ -205,6 +208,57 @@ if unmapped:
         + ", ".join(unmapped)
         + ". Adaugă-le în `src/predictiescor/utils/teamnames.py`."
     )
+
+st.divider()
+
+# ----------------------------------------------------------------------
+# Verificarea de plauzibilitate
+#
+# Tot ce s-a găsit stricat până acum s-a găsit fiindcă s-a uitat cineva. Aici
+# se uită aplicația, la fiecare deschidere a paginii.
+# ----------------------------------------------------------------------
+st.subheader("Verificarea datelor")
+
+stricate = implausible_rows(db)
+if not stricate:
+    st.success(
+        "**Nicio valoare imposibilă în baza de date.** Se verifică la "
+        "scriere, nu la citire: o cifră care nu poate fi adevărată — zero "
+        "pase, posesie peste 100, cartonașe cu zecimale — se scrie ca "
+        "„nu știu”, nu ca zero."
+    )
+else:
+    st.error(f"**{len(stricate)} rânduri cu valori imposibile.** Au intrat "
+             f"înainte ca verificarea să existe, sau printr-un drum care o "
+             f"ocolește.")
+    st.dataframe(
+        pd.DataFrame([{
+            "sezon": r["season"],
+            "data": local_time(r["utc_date"], "%d.%m.%Y"),
+            "meci": r["match_id"],
+            "câmpuri": ", ".join(r["campuri"]),
+            "valori": str(r["valori"]),
+        } for r in stricate[:50]],),
+        hide_index=True, width="stretch")
+
+lipsa = missing_columns(db, ("corners", "yellow_cards", "shots", "possession"))
+jucate = int(summary["meciuri_jucate"])
+st.caption("**Cât de completă e fiecare coloană**, din cele "
+           f"{jucate:,} meciuri jucate:".replace(",", "."))
+st.dataframe(
+    pd.DataFrame([{
+        "statistică": nume,
+        "meciuri cu date": jucate - fara,
+        "acoperire": (jucate - fara) / jucate if jucate else 0.0,
+    } for nume, fara in lipsa.items()]),
+    hide_index=True, width="stretch",
+    column_config={"acoperire": st.column_config.ProgressColumn(
+        format="percent", min_value=0.0, max_value=1.0)})
+st.caption(
+    "Golurile nu sunt erori — sunt limita reală a modelului. Un meci fără "
+    "cornere înregistrate nu strică nimic, dar nici nu învață nimic; "
+    "modelul de cornere vede doar meciurile din coloana din mijloc."
+)
 
 st.divider()
 st.subheader("Jurnalul descărcărilor")
