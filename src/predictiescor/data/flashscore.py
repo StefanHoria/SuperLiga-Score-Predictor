@@ -68,6 +68,7 @@ LIVE_STAT_IDS = {
     "17": "offsides",
     "19": "saves",
     "21": "fouls",
+    "22": "red_cards",
     "23": "yellow_cards",
     "34": "shots",
     "158": "shots_blocked",

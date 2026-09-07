@@ -178,12 +178,24 @@ for match in live:
         header[0].markdown(f"### {match.label}")
         header[1].metric("Scor", match.score)
         header[2].metric("Minut", match.minute if match.minute else "—")
+        # Piața pe care pariem numără DOAR galbenele, de la model până la
+        # decontare. Roșiile se arată separat, ca să se vadă că există, nu
+        # amestecate în cifra care judecă ponturile.
+        galbene, rosii = stats.get("yellow_cards"), stats.get("red_cards")
+        sub_cartonase = None
+        if galbene is not None:
+            sub_cartonase = f"{galbene[0]:.0f} – {galbene[1]:.0f}"
+            total_rosii = 0 if rosii is None else int(rosii[0] + rosii[1])
+            if total_rosii:
+                sub_cartonase += (f" · {total_rosii} roșu" if total_rosii == 1
+                                  else f" · {total_rosii} roșii")
+
         header[3].metric(
             "Cartonașe", "—" if cartonase is None else f"{cartonase:.0f}",
-            delta=None if stats.get("yellow_cards") is None else
-            f"{stats['yellow_cards'][0]:.0f} – {stats['yellow_cards'][1]:.0f}",
-            delta_color="off", help="Galbene, gazdă – oaspete. Cartonașele "
-                                    "roșii se numără separat de piața noastră.")
+            delta=sub_cartonase, delta_color="off",
+            help="Numărul mare e al **galbenelor**, gazdă – oaspete: asta "
+                 "numără piața pe care pariem, de la model până la "
+                 "decontare. Roșiile sunt scrise separat, nu adunate.")
         header[4].metric(
             "Cornere", "—" if cornere is None else f"{cornere:.0f}",
             delta=None if stats.get("corners") is None else

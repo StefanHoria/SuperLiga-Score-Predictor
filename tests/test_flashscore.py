@@ -232,10 +232,12 @@ STATS_FEED = (
     "~SD÷16¬SG÷Cornere¬SH÷3¬SI÷0¬"
     "~SD÷342¬SG÷Pase¬SH÷87% (183/211)¬SI÷80% (109/137)¬"
     "~SD÷23¬SG÷Cartonașe galbene¬SH÷2¬SI÷1¬"
+    "~SD÷22¬SG÷Cartonașe roșii¬SH÷1¬SI÷0¬"
     "~SE÷Repriza 1¬"
     "~SF÷Top statistici¬"
     "~SD÷23¬SG÷Cartonașe galbene¬SH÷1¬SI÷0¬"
     "~SD÷16¬SG÷Cornere¬SH÷1¬SI÷0¬"
+    "~SD÷22¬SG÷Cartonașe roșii¬SH÷0¬SI÷0¬"
 )
 
 
@@ -266,9 +268,30 @@ def test_a_value_with_a_detail_in_brackets_reads_as_the_percentage():
 def test_unknown_statistics_are_ignored():
     """Feed-ul are zeci de statistici; le luam doar pe cele folosite."""
     assert set(parse_match_stats(STATS_FEED)) == {
-        "possession", "shots", "corners", "yellow_cards"}
+        "possession", "shots", "corners", "yellow_cards", "red_cards"}
 
 
 def test_an_empty_feed_gives_nothing_not_zeros():
     """Zero cartonase si «nu stiu» sunt lucruri diferite."""
     assert parse_match_stats("") == {}
+
+
+def test_reads_red_cards_too():
+    """Rosiile stau pe `SD÷22`, separat de galbene.
+
+    Verificat pe meciuri reale: Dinamo - FCSB a avut 5+3 galbene si 1+1 rosii,
+    Otelul - Rapid 3+0 galbene si 1+0 rosii.
+    """
+    assert parse_match_stats(STATS_FEED)["red_cards"] == (1.0, 0.0)
+
+
+def test_red_cards_are_not_added_to_the_yellow_count():
+    """Piata pe care pariem numara doar galbenele, de la model la decontare."""
+    stats = parse_match_stats(STATS_FEED)
+    assert sum(stats["yellow_cards"]) == 3.0
+    assert sum(stats["red_cards"]) == 1.0
+
+
+def test_red_cards_also_only_from_the_whole_match_section():
+    """„Repriza 1" are zero rosii; citita, ar sterge cartonasul."""
+    assert parse_match_stats(STATS_FEED)["red_cards"] != (0.0, 0.0)
