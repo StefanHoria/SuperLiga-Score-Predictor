@@ -4,6 +4,18 @@ Fiecare picior este decontat comparand selectia cu ce s-a intamplat efectiv.
 Cand datele necesare lipsesc (de exemplu cornerele unui meci pentru care nu am
 apucat sa descarcam statisticile), piciorul este marcat **anulat**, nu ghicit -
 un bilet cu picioare anulate nu contamineaza statisticile de acuratete.
+
+Dar anularea aia e provizorie. Statisticile LPF apar la cateva ore dupa meci,
+iar decontarea ruleaza imediat ce se fluiera finalul, deci pontul pe cartonase
+prinde mereu baza goala. Marcat "anulat" pentru totdeauna, un pariu care de
+fapt a pierdut dispare din acuratete si o face sa arate mai bine decat e. Asa
+au ramas anulate doua bilete de pe 6 septembrie, desi Petrolul - Corvinul avea
+10 cartonase si Otelul - Rapid trei: amandoua pierdusera.
+
+Deci se face distinctia intre anularile care se pot repara (`RETRYABLE_VOIDS`
+- datele lipseau ATUNCI) si cele care nu se pot (selectie neinterpretabila,
+piata nesuportata). Primele sunt reluate la fiecare decontare, iar biletele
+lor sunt rejudecate.
 """
 from __future__ import annotations
 
@@ -18,6 +30,15 @@ import pandas as pd
 log = logging.getLogger(__name__)
 
 WON, LOST, VOID, OPEN = "castigat", "pierdut", "anulat", "deschis"
+
+#: Motivele de anulare care se pot schimba singure: datele lipseau la
+#: momentul decontarii, dar pot aparea mai tarziu. Restul motivelor - o
+#: selectie neinterpretabila, o piata nesuportata - n-au cum sa se repare,
+#: deci reluarea lor ar fi munca in gol la fiecare rulare.
+RETRYABLE_VOIDS = (
+    "statistici indisponibile pentru acest meci",
+    "nu avem date pe jucători pentru acest meci",
+)
 
 
 @dataclass
@@ -188,8 +209,13 @@ def settle_open_legs(db, *, match_day: str | None = None) -> int:
     datele de invatare, deci calibrarea pierdea sistematic exact ponturile de
     pe biletele pierdute.
     """
-    where = "l.result = ? AND m.home_goals IS NOT NULL"
-    params: list[Any] = [OPEN]
+    # Pe langa ponturile deschise, se reiau si cele anulate din lipsa de date:
+    # intre timp statisticile pot fi ajuns in baza. Daca tot lipsesc,
+    # `settle_leg` le anuleaza din nou si nu se pierde nimic.
+    marks = ", ".join("?" * len(RETRYABLE_VOIDS))
+    where = (f"(l.result = ? OR (l.result = ? AND l.actual_value IN ({marks})))"
+             " AND m.home_goals IS NOT NULL")
+    params: list[Any] = [OPEN, VOID, *RETRYABLE_VOIDS]
     if match_day:
         where += " AND t.match_day = ?"
         params.append(match_day)
@@ -228,12 +254,38 @@ def settle_open_legs(db, *, match_day: str | None = None) -> int:
     return len(updates)
 
 
+def _tickets_with_retryable_voids(db, match_day: str | None = None) -> set[int]:
+    """Biletele care au macar un pont anulat din lipsa de date.
+
+    Se citesc INAINTE de decontarea ponturilor: dupa ea, piciorul nu mai e
+    anulat, iar biletul - inchis de mult ca "anulat" sau "castigat" - n-ar mai
+    fi gasit de interogarea care cauta doar bilete deschise.
+    """
+    marks = ", ".join("?" * len(RETRYABLE_VOIDS))
+    sql = (f"SELECT DISTINCT l.ticket_id FROM ticket_legs l"
+           f" JOIN tickets t ON t.ticket_id = l.ticket_id"
+           f" WHERE l.result = ? AND l.actual_value IN ({marks})")
+    params: list[Any] = [VOID, *RETRYABLE_VOIDS]
+    if match_day:
+        sql += " AND t.match_day = ?"
+        params.append(match_day)
+    with db.connect() as conn:
+        return {int(r["ticket_id"]) for r in conn.execute(sql, params)}
+
+
 def settle_tickets(db, *, match_day: str | None = None) -> dict[str, int]:
     """Deconteaza ponturile jucate, apoi decide biletele inca deschise."""
+    revizuite = _tickets_with_retryable_voids(db, match_day)
     legs_settled = settle_open_legs(db, match_day=match_day)
 
     where = "t.status = ?"
     params: list[Any] = [OPEN]
+    if revizuite:
+        # Un bilet inchis ca "anulat" (sau castigat, cu piciorul anulat scos
+        # din cota) trebuie rejudecat daca intre timp s-a aflat rezultatul.
+        where = (f"({where} OR t.ticket_id IN "
+                 f"({', '.join('?' * len(revizuite))}))")
+        params.extend(sorted(revizuite))
     if match_day:
         where += " AND t.match_day = ?"
         params.append(match_day)

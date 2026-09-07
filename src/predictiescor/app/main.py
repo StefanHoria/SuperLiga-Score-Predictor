@@ -49,6 +49,19 @@ cols[2].metric("Echipe", summary["echipe"])
 cols[3].metric("Jucători", summary["jucatori"])
 cols[4].metric("Cote înregistrate", f"{summary['cote']:,}".replace(",", "."))
 
+# Numarul mare numara RANDURI, iar calendarul intregului sezon e adus dinainte:
+# un meci jucat nu adauga un rand, ci completeaza scorul pe unul existent. Fara
+# randul asta, cifra pare inghetata de la o etapa la alta.
+_programate = summary["meciuri"] - summary["meciuri_jucate"]
+st.caption(
+    f"Din cele **{summary['meciuri']:,}".replace(",", ".")
+    + f"** meciuri, **{summary['meciuri_jucate']:,}".replace(",", ".")
+    + f"** s-au jucat și **{_programate}** sunt programate. Numărul total "
+    "crește doar când apar meciuri noi în calendar, nu după fiecare etapă: "
+    "calendarul sezonului e adus întreg dinainte, iar un meci disputat "
+    "completează scorul pe un rând care există deja."
+)
+
 st.divider()
 
 # ----------------------------------------------------------------------
