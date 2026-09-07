@@ -46,7 +46,11 @@ tab_new, tab_history, tab_accuracy, tab_odds, tab_surprises = st.tabs(
 # ======================================================================
 # 1. Generare
 # ======================================================================
-with tab_new:
+# `st.stop()` oprea intregul script, nu doar tabul asta: cand ziua aleasa
+# n-avea niciun meci pe care sa se mai poata paria - azi, dupa startul
+# ultimului meci - se goleau si Istoric, Acuratete, Cote si Surprize.
+# Sectiunea sta intr-o functie ca sa poata iesi cu `return`.
+def _sectiunea_generare() -> None:
     upcoming_days = next_match_days(db, 12)
     past_days = recent_match_days(db, 12)
 
@@ -55,7 +59,7 @@ with tab_new:
     if not all_days:
         st.warning("Nu există meciuri în baza de date.")
         st.code("python scripts/update.py", language="bash")
-        st.stop()
+        return
 
     day = col1.selectbox(
         "Ziua meciurilor", all_days,
@@ -81,7 +85,7 @@ with tab_new:
 
     if matches.empty:
         st.info("Nu sunt meciuri de pariat în intervalul ales.")
-        st.stop()
+        return
 
     # `upcoming_matches` nu intoarce coloanele de scor (meciurile n-au unul).
     # Le adaugam goale, ca restul paginii sa trateze la fel toate variantele.
@@ -93,11 +97,22 @@ with tab_new:
     # jucate — si chiar ziua de azi poate avea un meci terminat la prânz si
     # unul seara. Nu are rost sa pariem pe cele începute.
     if is_upcoming:
+        inainte = len(matches)
         matches = bettable(matches)
+        incepute = inainte - len(matches)
+    else:
+        incepute = 0
 
     if matches.empty:
-        st.info("Nu sunt meciuri de pariat în intervalul ales.")
-        st.stop()
+        if incepute:
+            st.info(
+                f"Toate cele {incepute} meciuri din interval au început deja. "
+                "Pe un meci în desfășurare nu se mai pariază — alege altă zi "
+                "sau treci **Acoperire** pe „Următoarele meciuri programate”.",
+                icon="🕐")
+        else:
+            st.info("Nu sunt meciuri de pariat în intervalul ales.")
+        return
 
     st.caption(f"**{len(matches)} meciuri** în selecție:")
     preview = matches.copy()
@@ -202,6 +217,11 @@ with tab_new:
 # ======================================================================
 # 2. Istoric si verificare
 # ======================================================================
+
+
+with tab_new:
+    _sectiunea_generare()
+
 with tab_history:
     c1, c2 = st.columns([1, 3])
     if c1.button("Verifică biletele acum", type="primary"):
