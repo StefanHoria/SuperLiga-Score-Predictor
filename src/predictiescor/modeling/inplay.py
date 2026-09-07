@@ -126,12 +126,18 @@ def compare_with_pre_match(pipeline, state: InPlayState) -> dict[str, Any]:
 
 # ----------------------------------------------------------------------
 def ticket_status_live(db, state: InPlayState, match_id: int,
-                       pipeline=None) -> list[dict[str, Any]]:
+                       pipeline=None,
+                       stats: dict[str, tuple[float, float]] | None = None,
+                       ) -> list[dict[str, Any]]:
     """Cum stau ponturile de pe acest meci, chiar acum.
 
     Un pont poate fi deja decis inainte de fluierul final: "peste 1.5 goluri"
     la 2-0 in minutul 60 nu mai poate pica. Le impartim in trei: deja iesite,
     deja pierdute si inca in joc - iar pentru cele in joc dam sansa curenta.
+
+    `stats` sunt cartonasele si cornerele de pana acum, ca {coloana: (gazda,
+    oaspete)}. Fara ele, un pont pe cartonase ramanea „nedecidabil" tot
+    meciul, desi numarul lor se stie in orice clipa.
     """
     from ..tickets.settlement import LOST, MatchFacts, WON, settle_leg
 
@@ -147,9 +153,12 @@ def ticket_status_live(db, state: InPlayState, match_id: int,
     # pont e deja decis: ce e castigat la scorul curent si nu mai poate fi
     # pierdut ramane castigat doar daca golurile viitoare nu-l pot rasturna -
     # de aceea comparam si cu varianta "s-au mai marcat goluri".
+    stats = stats or {}
     now = MatchFacts(
         match_id=match_id, home_goals=state.home_goals,
-        away_goals=state.away_goals, home_stats={}, away_stats={},
+        away_goals=state.away_goals,
+        home_stats={name: pair[0] for name, pair in stats.items()},
+        away_stats={name: pair[1] for name, pair in stats.items()},
         scorers=set(), has_player_data=False,
     )
 

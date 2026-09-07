@@ -158,10 +158,35 @@ st.success("**1 meci în desfășurare**" if len(live) == 1
 
 for match in live:
     with st.container(border=True):
-        header = st.columns([3, 1, 1])
+        # Statisticile vin din alt feed decat scorul; daca nu raspunde,
+        # meciul se arata oricum, doar fara ele.
+        try:
+            stats = provider.fetch_match_stats(match.external_id)
+        except Exception as exc:  # noqa: BLE001
+            stats = {}
+            st.caption(f"Statisticile nu sunt disponibile acum ({exc}).")
+
+        def total(name: str) -> float | None:
+            pair = stats.get(name)
+            return None if pair is None else pair[0] + pair[1]
+
+        cartonase, cornere = total("yellow_cards"), total("corners")
+
+        header = st.columns([3, 1, 1, 1, 1])
         header[0].markdown(f"### {match.label}")
         header[1].metric("Scor", match.score)
         header[2].metric("Minut", match.minute if match.minute else "—")
+        header[3].metric(
+            "Cartonașe", "—" if cartonase is None else f"{cartonase:.0f}",
+            delta=None if stats.get("yellow_cards") is None else
+            f"{stats['yellow_cards'][0]:.0f} – {stats['yellow_cards'][1]:.0f}",
+            delta_color="off", help="Galbene, gazdă – oaspete. Cartonașele "
+                                    "roșii se numără separat de piața noastră.")
+        header[4].metric(
+            "Cornere", "—" if cornere is None else f"{cornere:.0f}",
+            delta=None if stats.get("corners") is None else
+            f"{stats['corners'][0]:.0f} – {stats['corners'][1]:.0f}",
+            delta_color="off")
 
         minute = match.minute or _estimate_minute(match)
         state = InPlayState(
@@ -186,7 +211,8 @@ for match in live:
 
         match_id = db.match_id_by_external("flashscore", match.external_id)
         if match_id:
-            rows = ticket_status_live(db, state, match_id, pipeline)
+            rows = ticket_status_live(db, state, match_id,
+                                      pipeline, stats=stats)
             if rows:
                 st.markdown("**Ponturile tale pe acest meci**")
                 icons = {"castigat": "✅ iese acum", "pierdut": "❌ pică acum",

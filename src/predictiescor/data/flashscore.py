@@ -53,6 +53,29 @@ LIVE_FEED_HEADERS = {"x-fsign": "SW9D1eZo"}
 #: perechea turneu_sezon, asa cum o scrie feed-ul in antetul lui
 _FEED_KEY_RE = re.compile(r"ZH÷(\w+_\w+)")
 
+#: Statisticile unui meci, live sau incheiat. Aceleasi cifre pe care le arata
+#: site-ul la „Statistici meci".
+MATCH_STATS_URL = "https://9.flashscore.ninja/9/x/feed/df_st_1_{match}"
+
+#: `SD` e un id numeric de statistica, stabil intre limbi - de aceea se
+#: potriveste dupa el, nu dupa numele romanesc, care se poate schimba.
+LIVE_STAT_IDS = {
+    "12": "possession",
+    "13": "shots_on_target",
+    "14": "shots_off_target",
+    "15": "free_kicks",
+    "16": "corners",
+    "17": "offsides",
+    "19": "saves",
+    "21": "fouls",
+    "23": "yellow_cards",
+    "34": "shots",
+    "158": "shots_blocked",
+    "432": "xg",
+    "461": "shots_inside_box",
+    "463": "shots_outside_box",
+}
+
 #: starile pe care le-am putut confirma direct din feed
 STATUS_SCHEDULED = "1"
 STATUS_LIVE = "2"
@@ -215,6 +238,44 @@ def _live_minute(fields: dict[str, str], *, now: float | None = None
     return minute if 0 < minute <= 130 else None
 
 
+def _stat_number(text: str) -> float | None:
+    """Cifra dintr-o valoare de statistica.
+
+    Vin in trei forme: „3", „61%" si „87% (183/211)". Peste tot conteaza
+    primul numar; procentul si detaliul din paranteza se ignora.
+    """
+    found = re.search(r"-?\d+(?:\.\d+)?", str(text or ""))
+    return float(found.group(0)) if found else None
+
+
+def parse_match_stats(raw: str) -> dict[str, tuple[float, float]]:
+    """Statisticile meciului, ca {coloana: (gazda, oaspete)}.
+
+    Feed-ul repeta aceleasi statistici pe sectiuni: intai „Meci" (tot meciul),
+    apoi „Repriza 1", „Repriza 2". Se citeste **doar prima**; altfel valorile
+    de pe reprize le-ar suprascrie pe cele totale si un meci cu doua cartonase
+    in prima repriza si trei in a doua ar raporta trei.
+    """
+    out: dict[str, tuple[float, float]] = {}
+    sections = 0
+    for chunk in raw.split("~"):
+        fields = _parse_fields(chunk)
+        if "SE" in fields:
+            sections += 1
+            if sections > 1:
+                break
+            continue
+        stat_id = fields.get("SD")
+        if not stat_id or stat_id not in LIVE_STAT_IDS:
+            continue
+        home = _stat_number(fields.get("SH"))
+        away = _stat_number(fields.get("SI"))
+        if home is None or away is None:
+            continue
+        out[LIVE_STAT_IDS[stat_id]] = (home, away)
+    return out
+
+
 def _information(match: LiveMatch) -> int:
     """Cate campuri utile are un rand - pentru a alege intre duplicate."""
     return sum(1 for value in (match.home_goals, match.away_goals,
@@ -283,6 +344,19 @@ class FlashscoreProvider(DataProvider):
             LIVE_FEED_URL.format(key=found.group(1)),
             ttl_hours=0, use_cache=False, extra_headers=LIVE_FEED_HEADERS)
         return _deduplicate(parse_feed(raw))
+
+    def fetch_match_stats(self, external_id: str
+                          ) -> dict[str, tuple[float, float]]:
+        """Statisticile unui meci, mergand si in timpul lui.
+
+        De aici vine numarul de cartonase de pana acum: feed-ul de scor da
+        doar golurile, iar fara statistici un pont pe cartonase ramanea
+        „nedecidabil" cat timp se juca meciul.
+        """
+        raw = self.http.get_text(
+            MATCH_STATS_URL.format(match=external_id),
+            ttl_hours=0, use_cache=False, extra_headers=LIVE_FEED_HEADERS)
+        return parse_match_stats(raw)
 
     def fetch_feed_with_live(self) -> list[LiveMatch]:
         """Programul intreg, plus meciurile care se joaca chiar acum.

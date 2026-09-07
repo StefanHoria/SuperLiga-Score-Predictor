@@ -9,7 +9,8 @@ import numpy as np
 import pytest
 
 from predictiescor.data.flashscore import (
-    _deduplicate, _live_minute, _parse_fields, parse_feed,
+    _deduplicate, _live_minute, _parse_fields, _stat_number,
+    parse_feed, parse_match_stats,
 )
 
 # Fragment cu structura reala: doua meciuri, unul incheiat si unul programat,
@@ -214,3 +215,60 @@ def test_at_kickoff_it_matches_a_full_match():
     index = np.arange(full.shape[0])
     assert float((full.sum(axis=1) * index).sum()) == pytest.approx(1.5, abs=0.01)
     assert float((full.sum(axis=0) * index).sum()) == pytest.approx(1.0, abs=0.01)
+
+
+# ----------------------------------------------------------------------
+# Statisticile meciului
+#
+# Fragment din feed-ul real al meciului Univ. Craiova - „U" Cluj. Are doua
+# sectiuni cu aceleasi statistici: „Meci" (tot meciul) si „Repriza 1", cu
+# valori diferite. Citita si a doua, ar suprascrie totalurile.
+# ----------------------------------------------------------------------
+STATS_FEED = (
+    "SE÷Meci¬"
+    "~SF÷Top statistici¬"
+    "~SD÷12¬SG÷Posesie minge¬SH÷61%¬SI÷39%¬"
+    "~SD÷34¬SG÷Total șuturi¬SH÷9¬SI÷0¬"
+    "~SD÷16¬SG÷Cornere¬SH÷3¬SI÷0¬"
+    "~SD÷342¬SG÷Pase¬SH÷87% (183/211)¬SI÷80% (109/137)¬"
+    "~SD÷23¬SG÷Cartonașe galbene¬SH÷2¬SI÷1¬"
+    "~SE÷Repriza 1¬"
+    "~SF÷Top statistici¬"
+    "~SD÷23¬SG÷Cartonașe galbene¬SH÷1¬SI÷0¬"
+    "~SD÷16¬SG÷Cornere¬SH÷1¬SI÷0¬"
+)
+
+
+def test_reads_the_cards_given_so_far():
+    stats = parse_match_stats(STATS_FEED)
+    assert stats["yellow_cards"] == (2.0, 1.0)
+    assert sum(stats["yellow_cards"]) == 3.0
+
+
+def test_only_the_whole_match_section_counts():
+    """„Repriza 1" repeta aceleasi statistici, cu alte valori.
+
+    Citita si ea, un meci cu trei cornere in total si unul in prima repriza
+    ar raporta unul.
+    """
+    assert parse_match_stats(STATS_FEED)["corners"] == (3.0, 0.0)
+
+
+def test_percentages_keep_only_the_number():
+    assert parse_match_stats(STATS_FEED)["possession"] == (61.0, 39.0)
+
+
+def test_a_value_with_a_detail_in_brackets_reads_as_the_percentage():
+    """«87% (183/211)» inseamna 87, nu 183."""
+    assert _stat_number("87% (183/211)") == 87.0
+
+
+def test_unknown_statistics_are_ignored():
+    """Feed-ul are zeci de statistici; le luam doar pe cele folosite."""
+    assert set(parse_match_stats(STATS_FEED)) == {
+        "possession", "shots", "corners", "yellow_cards"}
+
+
+def test_an_empty_feed_gives_nothing_not_zeros():
+    """Zero cartonase si «nu stiu» sunt lucruri diferite."""
+    assert parse_match_stats("") == {}
