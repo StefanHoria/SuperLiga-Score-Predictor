@@ -273,6 +273,42 @@ def _tickets_with_retryable_voids(db, match_day: str | None = None) -> set[int]:
         return {int(r["ticket_id"]) for r in conn.execute(sql, params)}
 
 
+def resettle_matches(db, match_ids: Iterable[int]) -> dict[str, int]:
+    """Judeca din nou ponturile de pe meciurile date, de la zero.
+
+    Decontarea obisnuita nu se mai uita la un pont odata decis - si bine face,
+    altfel ar rescrie istoria la fiecare rulare. Dar cand se repara **datele**
+    pe care s-a judecat, verdictul trebuie refacut: LPF scrisese 0 cornere la
+    FCSB - UTA Arad, asa ca „sub 8.5 cornere" iesise castigat; meciul avusese
+    noua.
+
+    Se cheama la mana, dupa o reparare de date, nu la fiecare actualizare.
+    """
+    ids = [int(m) for m in match_ids]
+    if not ids:
+        return {"decontate": 0, "in_asteptare": 0, "ponturi": 0}
+
+    marks = ", ".join("?" * len(ids))
+    with db.connect() as conn:
+        tickets = [int(r["ticket_id"]) for r in conn.execute(
+            f"SELECT DISTINCT ticket_id FROM ticket_legs"
+            f" WHERE match_id IN ({marks})", ids)]
+        if not tickets:
+            return {"decontate": 0, "in_asteptare": 0, "ponturi": 0}
+        conn.execute(
+            f"UPDATE ticket_legs SET result = ?, actual_value = NULL"
+            f" WHERE match_id IN ({marks})", [OPEN, *ids])
+        # Biletul se redeschide ca sa fie rejudecat; ce se stie despre
+        # celelalte picioare ale lui ramane pe loc.
+        conn.execute(
+            f"UPDATE tickets SET status = ?, payout = NULL, profit = NULL,"
+            f" settled_at = NULL, legs_won = 0"
+            f" WHERE ticket_id IN ({', '.join('?' * len(tickets))})",
+            [OPEN, *tickets])
+    log.info("redeconez %d bilete de pe %d meciuri", len(tickets), len(ids))
+    return settle_tickets(db)
+
+
 def settle_tickets(db, *, match_day: str | None = None) -> dict[str, int]:
     """Deconteaza ponturile jucate, apoi decide biletele inca deschise."""
     revizuite = _tickets_with_retryable_voids(db, match_day)

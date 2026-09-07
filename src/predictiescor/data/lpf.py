@@ -70,6 +70,10 @@ STAT_MAP: dict[str, str] = {
     "Dueluri câștigate": "duels_won",
 }
 
+#: Statistici care nu pot fi zero intr-un meci chiar jucat. Daca sunt zero,
+#: tabelul nu e completat inca - vezi `_stats_are_filled`.
+VITAL_LABELS = ("Total pase", "Posesia mingii")
+
 #: iconita evenimentului -> tipul lui
 EVENT_ICONS: dict[str, str] = {
     "gol.png": "goal",
@@ -181,10 +185,11 @@ class LpfProvider(DataProvider):
         if not stats:
             return None
 
-        # Meci neînceput: pagina exista, dar toate valorile sunt zero.
-        if not self._has_real_values(stats):
-            log.debug("[%s] meciul %s nu s-a jucat inca", self.name,
-                      match_page_id)
+        # Meci neinceput SAU pagina inca necompletata. In ambele cazuri nu
+        # avem statistici; zerourile de acolo nu sunt zerouri adevarate.
+        if not self._stats_are_filled(stats):
+            log.debug("[%s] pagina %s nu are inca statistici completate",
+                      self.name, match_page_id)
             return None
 
         kickoff = self._parse_kickoff(soup)
@@ -231,6 +236,31 @@ class LpfProvider(DataProvider):
                 if digits and digits != "0" * len(digits):
                     return True
         return False
+
+    @classmethod
+    def _stats_are_filled(cls, stats: dict[str, tuple[str, str]]) -> bool:
+        """True daca tabelul de statistici chiar a fost completat.
+
+        LPF publica pagina meciului **treptat**: imediat dupa fluierul final
+        apar cartonasele, iar restul tabelului sta pe zero cateva ore. Garda
+        veche cerea doar ca *ceva* sa nu fie zero, deci pagina asta trecea, si
+        scriam „0 cornere, 0 suturi" ca valori adevarate. Cinci meciuri din 61
+        au ajuns asa in baza; la Otelul - Rapid scria 0 cornere, cand pagina
+        (citita mai tarziu) are 1 si 9.
+
+        Reperul sunt statisticile care nu pot fi zero intr-un meci chiar jucat:
+        nicio echipa nu termina un meci cu zero pase si zero posesie. Cand ele
+        sunt zero, nici cartonasele nu sunt de incredere - la acelasi meci
+        scria 2 galbene, cand fusesera 3.
+        """
+        prezente = [stats[label] for label in VITAL_LABELS if label in stats]
+        if not prezente:
+            # Etichetele s-au schimbat? Mai bine cadem pe garda veche decat sa
+            # respingem tot si sa nu mai intre nimic, tacut.
+            log.warning("[lpf] nu gasesc %s in pagina - folosesc garda veche",
+                        " / ".join(VITAL_LABELS))
+            return cls._has_real_values(stats)
+        return any(cls.to_float(value) for pair in prezente for value in pair)
 
     @staticmethod
     def _parse_kickoff(soup: BeautifulSoup) -> datetime | None:
@@ -759,13 +789,19 @@ class LpfProvider(DataProvider):
 
         Cerem si statistici de echipa, si aparitii de jucatori: daca adaugam
         ulterior un tip nou de date, meciurile vechi sunt reprocesate automat.
+
+        Si cerem ca statisticile sa fie **intregi**: un rand scris dintr-o
+        pagina inca necompletata (zero pase) trebuie recitit cand LPF o umple.
+        Fara conditia asta, cele cinci meciuri stricate ar fi ramas stricate
+        pentru totdeauna - pagina se citea o singura data in viata ei.
         """
         with self.db.connect() as conn:
             rows = conn.execute(
                 "SELECT e.ext_id FROM match_external_ids e"
                 " WHERE e.source = ?"
                 "   AND EXISTS (SELECT 1 FROM match_team_stats s"
-                "               WHERE s.match_id = e.match_id)"
+                "               WHERE s.match_id = e.match_id"
+                "                 AND COALESCE(s.passes, 0) > 0)"
                 "   AND EXISTS (SELECT 1 FROM player_match_stats p"
                 "               WHERE p.match_id = e.match_id)",
                 (self.name,),

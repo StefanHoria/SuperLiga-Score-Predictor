@@ -107,6 +107,79 @@ def test_future_match_detected_as_empty():
     assert LpfProvider._has_real_values(parse(FUTURE_PAGE)) is False
 
 
+# ----------------------------------------------------------------------
+# Pagina completata pe jumatate
+#
+# LPF publica pagina meciului TREPTAT: imediat dupa fluierul final apar
+# cartonasele, iar restul tabelului sta pe zero cateva ore. Garda veche cerea
+# doar ca *ceva* sa nu fie zero, deci pagina asta trecea si scriam „0 cornere,
+# 0 suturi" ca valori adevarate. Cinci meciuri din 61 au ajuns asa in baza.
+#
+# Masurat pe 7 septembrie 2026, fata de Flashscore: FCSB - UTA Arad avea in
+# baza 0 cornere si avusese 9; CFR Cluj - Farul 0 si avusese 11. Pontul „sub
+# 8.5 cornere" iesise castigat contra unui zero inventat.
+# ----------------------------------------------------------------------
+HALF_FILLED_PAGE = """
+<html><head><title>FCSB - UTA ARAD - Etapa 7 Superliga - Statistici live</title>
+</head>
+<body>
+  <span>30 august 2026, 21:00</span>
+  <table>
+    <tr><td class="stats_subtitle" colspan="2">Cartonașe galbene</td></tr>
+    <tr>
+      <td class="stats_val_gazda"><div class="val_gazda">2</div></td>
+      <td class="stats_val_oaspeti"><div class="val_oaspeti">0</div></td>
+    </tr>
+    <tr><td class="stats_subtitle" colspan="2">Posesia mingii</td></tr>
+    <tr>
+      <td class="stats_val_gazda"><div class="val_gazda">0%</div></td>
+      <td class="stats_val_oaspeti"><div class="val_oaspeti">0%</div></td>
+    </tr>
+    <tr><td class="stats_subtitle" colspan="2">Cornere</td></tr>
+    <tr>
+      <td class="stats_val_gazda"><div class="val_gazda">0</div></td>
+      <td class="stats_val_oaspeti"><div class="val_oaspeti">0</div></td>
+    </tr>
+    <tr><td class="stats_subtitle" colspan="2">Total pase</td></tr>
+    <tr>
+      <td class="stats_val_gazda"><div class="val_gazda">0</div></td>
+      <td class="stats_val_oaspeti"><div class="val_oaspeti">0</div></td>
+    </tr>
+  </table>
+</body></html>
+"""
+
+
+def test_a_half_filled_page_is_not_taken_for_data():
+    """Cartonasele puse, restul pe zero: tabelul nu e completat inca."""
+    assert LpfProvider._stats_are_filled(parse(HALF_FILLED_PAGE)) is False
+
+
+def test_the_old_guard_let_it_through():
+    """De asta a scapat: `_has_real_values` vedea cele doua cartonase."""
+    assert LpfProvider._has_real_values(parse(HALF_FILLED_PAGE)) is True
+
+
+def test_a_filled_page_passes():
+    assert LpfProvider._stats_are_filled(parse(PAGE)) is True
+
+
+def test_a_future_page_is_still_rejected():
+    assert LpfProvider._stats_are_filled(parse(FUTURE_PAGE)) is False
+
+
+def test_zero_passes_alone_is_enough_to_reject():
+    """Nicio echipa nu termina un meci cu zero pase."""
+    assert LpfProvider._stats_are_filled(
+        {"Total pase": ("0", "0"), "Cornere": ("4", "6")}) is False
+
+
+def test_a_missing_label_falls_back_instead_of_rejecting_everything():
+    """Daca LPF redenumeste coloanele, nu ne oprim tacut din a mai citi."""
+    assert LpfProvider._stats_are_filled({"Cornere": ("4", "6")}) is True
+    assert LpfProvider._stats_are_filled({"Cornere": ("0", "0")}) is False
+
+
 def test_columns_are_mapped_and_derived(provider):
     stats = parse(PAGE)
     home = provider._columns(0, stats)

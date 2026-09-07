@@ -1100,6 +1100,60 @@ aparițiile lui din meciurile trecute rămân, și e corect să rămână.
 
 ---
 
+## Zero nu înseamnă „zero", când sursa n-a apucat să scrie
+
+LPF publică pagina meciului **treptat**: imediat după fluierul final apar
+carto­nașele, iar restul tabelului stă pe zero încă vreo câteva ore. Garda de
+la citire cerea doar ca *ceva* să nu fie zero — cele două cartonașe îi
+ajungeau — deci pagina trecea și scriam „0 cornere, 0 șuturi" ca valori
+adevărate.
+
+Al doilea capăt, fără de care primul n-ar fi ajutat: pagina se citea **o
+singură dată în viața ei**. Ce s-a scris atunci rămânea acolo pentru
+totdeauna.
+
+### Cât de mult
+
+Cinci din cele 61 de meciuri jucate anul acesta, verificate față de Flashscore:
+
+| meci | în bază | de fapt |
+|---|---|---|
+| FCSB — UTA Arad | 0 cornere | 9 |
+| CFR Cluj — Farul | 0 | 11 |
+| Farul — FC Botoșani | 0 | 11 |
+| FC Botoșani — Sepsi | 0 | 8 |
+| Oțelul — Rapid | 0 | 9 |
+
+Sezoanele 2022–2024, aduse de API-Football, n-au niciun asemenea rând: e strict
+de la sursa LPF adăugată anul ăsta.
+
+### Ce strica
+
+Modelul de cornere și cartonașe se antrena pe zerourile astea, deci mediile
+ligii ieșeau prea mici. Iar decontarea judeca „peste 8.5 cornere" contra unui
+zero inventat: pontul *sub 8.5* de pe FCSB — UTA ieșise **câștigat** la un meci
+cu nouă cornere, iar *peste 7.5* de pe același meci ieșise **pierdut**.
+
+### Reparația
+
+Reperul sunt statisticile care nu pot fi zero într-un meci chiar jucat: nicio
+echipă nu termină cu zero pase și zero posesie. Când ele sunt zero, pagina nu e
+completată, iar din ea nu se ia nimic — nici cartonașele, care la Oțelul —
+Rapid arătau 2 când fuseseră 3.
+
+Recitirea cere acum ca rândul stocat să fie **întreg** (`passes > 0`), altfel
+pagina intră din nou în listă la următoarea rulare. `upsert_team_stats`
+folosea deja `COALESCE`, deci o valoare adevărată suprascrie zeroul, iar un
+`NULL` nu șterge ce se știe.
+
+Pentru biletele deja judecate pe cifrele greșite există `resettle_matches()`:
+redeschide ponturile de pe meciurile date și le judecă din nou. Decontarea
+obișnuită nu se mai uită la un pont odată decis — și bine face, altfel ar
+rescrie istoria la fiecare rulare — dar când se repară **datele**, verdictul
+trebuie refăcut. După reparație, Brier-ul pe piața de cornere a scăzut de la
+0.274 la **0.258**.
+
+
 ## Ponturi live, din ce s-a întâmplat până acum
 
 Ideea încape într-o propoziție: **ce s-a jucat e sigur, restul se estimează
