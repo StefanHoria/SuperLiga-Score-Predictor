@@ -99,6 +99,15 @@ LIVE_STAT_IDS = {
     "463": "shots_outside_box",
 }
 
+#: Restul statisticilor din acelasi raspuns. Se scriu ca **umplere de goluri**:
+#: doar unde nu are nimeni nimic. Nimeni n-a masurat ca Flashscore ar fi mai
+#: buna decat LPF sau API-Football pe ele, deci n-are ce cauta peste valorile
+#: lor - dar acolo unde lipsesc cu totul, o cifra e mai buna decat niciuna.
+#:
+#: `xg` merita mentionat separat: e xG-ul masurat, pe care il aveam doar
+#: pentru 220 de randuri si il reconstruiam din zonele de sut in `xg.py`.
+GAP_FILL_STATS = tuple(sorted(set(LIVE_STAT_IDS.values()) - set(INGESTED_STATS)))
+
 #: starile pe care le-am putut confirma direct din feed
 STATUS_SCHEDULED = "1"
 STATUS_LIVE = "2"
@@ -465,15 +474,15 @@ class FlashscoreProvider(DataProvider):
             except Exception as exc:  # noqa: BLE001
                 result.errors.append(f"meci {ext_id}: {exc}")
                 continue
-            columns = {name: stats[name] for name in INGESTED_STATS
-                       if name in stats}
+            columns = {name: stats[name] for name in
+                       (*INGESTED_STATS, *GAP_FILL_STATS) if name in stats}
             if not columns:
                 continue
             for team_id, side in ((home_id, 0), (away_id, 1)):
                 self.db.upsert_team_stats(
                     match_id, team_id, side == 0,
                     {name: pair[side] for name, pair in columns.items()},
-                    source=self.name)
+                    source=self.name, fill_only=GAP_FILL_STATS)
                 result.team_stats += 1
             result.matches += 1
         log.info("[%s] statistici: %d meciuri, %d randuri",

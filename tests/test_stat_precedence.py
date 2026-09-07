@@ -17,7 +17,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import pytest
 
 from predictiescor.data.flashscore import (
-    INGESTED_STATS, STATS_RECHECK_DAYS, FlashscoreProvider,
+    GAP_FILL_STATS, INGESTED_STATS, STATS_RECHECK_DAYS,
+    FlashscoreProvider,
 )
 from predictiescor.data.lpf import DEFER_TO_FLASHSCORE
 from predictiescor.storage.db import Database
@@ -107,8 +108,47 @@ def test_an_empty_value_never_erases(db):
 
 
 def test_the_two_lists_agree():
-    """Ce cedează LPF trebuie să fie exact ce aduce Flashscore."""
+    """Ce cedează LPF trebuie să fie exact ce aduce Flashscore cu ultimul cuvânt."""
     assert set(DEFER_TO_FLASHSCORE) == set(INGESTED_STATS)
+
+
+def test_the_two_kinds_of_column_do_not_overlap():
+    """O coloană e ori a Flashscore, ori umplere de goluri — nu amândouă."""
+    assert not set(INGESTED_STATS) & set(GAP_FILL_STATS)
+
+
+def test_gap_fill_does_not_touch_an_existing_value(db):
+    """Nimeni n-a măsurat că Flashscore ar fi mai bună pe șuturi sau posesie.
+
+    Deci acolo nu se suprascrie: LPF și API-Football rămân cu ce au scris, iar
+    Flashscore umple doar unde nu are nimeni nimic.
+    """
+    match_id = _match(db)
+    _write(db, match_id, "lpf", {"shots": 20.0, "possession": 61.0})
+    _write(db, match_id, "flashscore", {"shots": 16.0, "possession": 55.0},
+           fill_only=GAP_FILL_STATS)
+    assert _read(db, match_id, "shots") == 20.0
+    assert _read(db, match_id, "possession") == 61.0
+
+
+def test_gap_fill_does_fill_a_gap(db):
+    """Acolo unde lipsește cu totul, o cifră e mai bună decât niciuna."""
+    match_id = _match(db)
+    _write(db, match_id, "lpf", {"corners": 5.0})
+    _write(db, match_id, "flashscore", {"shots": 16.0, "xg": 1.4},
+           fill_only=GAP_FILL_STATS)
+    assert _read(db, match_id, "shots") == 16.0
+    assert _read(db, match_id, "xg") == 1.4
+
+
+def test_corners_still_overwrite_even_in_the_same_call(db):
+    """Un singur apel poate avea și coloane cu ultimul cuvânt, și umplere."""
+    match_id = _match(db)
+    _write(db, match_id, "lpf", {"corners": 2.0, "shots": 20.0})
+    _write(db, match_id, "flashscore", {"corners": 7.0, "shots": 16.0},
+           fill_only=GAP_FILL_STATS)
+    assert _read(db, match_id, "corners") == 7.0, "Flashscore are ultimul cuvânt"
+    assert _read(db, match_id, "shots") == 20.0, "aici doar umple golurile"
 
 
 # ----------------------------------------------------------------------

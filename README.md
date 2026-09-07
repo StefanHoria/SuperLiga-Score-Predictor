@@ -1231,10 +1231,36 @@ rezultatele unui sezon trecut, `link_archive` le leagă de baza noastră după z
 Rândurile de echipă cu cornere: **de la 848 la 2688**. Modelul de cornere și
 cartonașe vedea o treime din istorie; acum o vede aproape toată.
 
-Ce **nu** s-a completat: șuturile și posesia rămân la 840 de rânduri. Ele vin
-de la API-Football și LPF, iar din arhivă s-au adus doar cele două piețe pe
-care se pariază — restul ar fi schimbat tăcut proveniența unor date care n-au
-fost puse în discuție.
+### Restul statisticilor, ca umplere de goluri
+
+Flashscore returnează **15 statistici** în același răspuns din care noi luam
+trei. Restul se scriu acum ca *umplere de goluri*: doar unde nu are nimeni
+nimic. Nimeni n-a măsurat că Flashscore ar fi mai bună decât LPF sau
+API-Football pe ele, deci n-au ce căuta peste valorile lor — dar acolo unde
+lipsesc cu totul, o cifră e mai bună decât niciuna.
+
+| coloană | înainte | după |
+|---|---|---|
+| șuturi | 840 | **2690** (100%) |
+| șuturi pe poartă | 824 | **2690** (100%) |
+| posesie | 650 | **2690** (100%) |
+| intervenții portar | 614 | **2690** (100%) |
+| faulturi | 844 | **2688** (99.9%) |
+| offside-uri | 524 | **2680** (99.6%) |
+| lovituri libere | 122 | **2668** (99.2%) |
+| șuturi blocate | 648 | **2406** (89.4%) |
+| **xG măsurat** | **220** | **1678** (62.4%) |
+
+Ultimul contează cel mai mult: aveam xG real pentru 220 de rânduri și îl
+*reconstruiam* din zonele de șut în `xg.py` — o aproximare făcută tocmai
+fiindcă lipsea măsurătoarea. Acum e de șapte ori mai mult xG adevărat.
+
+Un lucru de spus pe față: **niciun pariu nu se schimbă**. Modelul de goluri
+(Dixon-Coles), care dă 1X2, total goluri, ambele marchează, scor exact și
+handicap, se antrenează **numai pe goluri** — nici șuturi, nici xG, nici
+posesie. Iar din statistici se pariază doar cornere și cartonașe, complete de
+dinainte. Câștigul e la citit: tabelele de pe *Predicție meci* și *Echipe* și
+modelele secundare (22 acum) au pe ce sta.
 
 ### Ce rămâne negarantat
 
