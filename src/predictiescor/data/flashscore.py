@@ -57,6 +57,16 @@ _FEED_KEY_RE = re.compile(r"ZH÷(\w+_\w+)")
 #: site-ul la „Statistici meci".
 MATCH_STATS_URL = "https://9.flashscore.ninja/9/x/feed/df_st_1_{match}"
 
+#: Coloanele pe care Flashscore le scrie in baza, cu ultimul cuvant. Restul
+#: statisticilor raman ale LPF, sursa oficiala a ligii; aici e vorba doar de
+#: cele doua piete pe care se pariaza, unde LPF s-a dovedit nesigura: la
+#: Dinamo - FCSB publica 2-2 cornere la un meci cu 32 de suturi, iar
+#: Flashscore da 14.
+INGESTED_STATS = ("corners", "yellow_cards", "red_cards")
+
+#: Cate zile dupa meci se mai cer statisticile. Dupa atata, nu se mai schimba.
+STATS_RECHECK_DAYS = 7
+
 #: `SD` e un id numeric de statistica, stabil intre limbi - de aceea se
 #: potriveste dupa el, nu dupa numele romanesc, care se poate schimba.
 LIVE_STAT_IDS = {
@@ -358,6 +368,58 @@ class FlashscoreProvider(DataProvider):
             MATCH_STATS_URL.format(match=external_id),
             ttl_hours=0, use_cache=False, extra_headers=LIVE_FEED_HEADERS)
         return parse_match_stats(raw)
+
+    def ingest_stats(self, season: int, *, full: bool = False) -> IngestResult:
+        """Scrie cornerele si cartonasele meciurilor jucate.
+
+        Se cer doar meciurile la care raspunsul se mai poate schimba - cele
+        din ultimele `STATS_RECHECK_DAYS` zile - plus cele carora le lipsesc
+        cornerele cu totul. `full=True` reia tot sezonul, pentru o reparare.
+
+        O cerere per meci, deci lista trebuie sa ramana scurta: intr-o rulare
+        obisnuita sunt cele opt meciuri ale etapei.
+        """
+        result = IngestResult(source=self.name)
+        for match_id, ext_id, home_id, away_id in self._stats_todo(season, full):
+            try:
+                stats = self.fetch_match_stats(ext_id)
+            except Exception as exc:  # noqa: BLE001
+                result.errors.append(f"meci {ext_id}: {exc}")
+                continue
+            columns = {name: stats[name] for name in INGESTED_STATS
+                       if name in stats}
+            if not columns:
+                continue
+            for team_id, side in ((home_id, 0), (away_id, 1)):
+                self.db.upsert_team_stats(
+                    match_id, team_id, side == 0,
+                    {name: pair[side] for name, pair in columns.items()},
+                    source=self.name)
+                result.team_stats += 1
+            result.matches += 1
+        log.info("[%s] statistici: %d meciuri, %d randuri",
+                 self.name, result.matches, result.team_stats)
+        return result
+
+    def _stats_todo(self, season: int, full: bool) -> list[tuple]:
+        """Meciurile carora le cerem statisticile in rularea asta."""
+        where = "" if full else (
+            f" AND (m.utc_date >= datetime('now', '-{STATS_RECHECK_DAYS} days')"
+            "      OR NOT EXISTS (SELECT 1 FROM match_team_stats s"
+            "                     WHERE s.match_id = m.match_id"
+            "                       AND s.corners IS NOT NULL))")
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                "SELECT m.match_id, e.ext_id, m.home_team_id, m.away_team_id"
+                " FROM matches m"
+                " JOIN match_external_ids e ON e.match_id = m.match_id"
+                "  AND e.source = ?"
+                " WHERE m.season = ? AND m.status = 'finished'" + where
+                + " ORDER BY m.utc_date DESC",
+                (self.name, season),
+            ).fetchall()
+        return [(int(r["match_id"]), str(r["ext_id"]),
+                 int(r["home_team_id"]), int(r["away_team_id"])) for r in rows]
 
     def fetch_feed_with_live(self) -> list[LiveMatch]:
         """Programul intreg, plus meciurile care se joaca chiar acum.

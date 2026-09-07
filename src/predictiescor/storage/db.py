@@ -451,12 +451,29 @@ class Database:
         is_home: bool,
         stats: dict[str, Any],
         source: str = "",
+        fill_only: Iterable[str] = (),
     ) -> None:
+        """Scrie statisticile unei echipe dintr-un meci.
+
+        `fill_only` sunt coloanele pe care providerul asta le pune **doar daca
+        nu le are nimeni** - adica cele pe care alta sursa are ultimul cuvant.
+        Cornerele si cartonasele vin asa de la LPF, fiindca Flashscore e sursa
+        principala pe ele: la Dinamo - FCSB, LPF publica 2-2 cornere la un meci
+        cu 32 de suturi, unde Flashscore da 14.
+
+        Fara distinctia asta, precedenta ar depinde de ordinea pasilor din
+        actualizare - cine scrie ultimul castiga - si s-ar strica tacut la
+        prima reordonare.
+        """
+        deferred = {c for c in fill_only if c in TEAM_STAT_COLUMNS}
         clean = {k: stats.get(k) for k in TEAM_STAT_COLUMNS}
         cols = ["match_id", "team_id", "is_home", *TEAM_STAT_COLUMNS, "source"]
         vals = [match_id, team_id, int(is_home), *clean.values(), source]
-        # COALESCE: un provider fara valoare nu sterge valoarea altui provider
+        # COALESCE: un provider fara valoare nu sterge valoarea altui provider.
+        # Ordinea argumentelor spune cine are ultimul cuvant.
         updates = ", ".join(
+            f"{c} = COALESCE(match_team_stats.{c}, excluded.{c})"
+            if c in deferred else
             f"{c} = COALESCE(excluded.{c}, match_team_stats.{c})"
             for c in TEAM_STAT_COLUMNS
         )

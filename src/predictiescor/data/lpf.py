@@ -74,6 +74,12 @@ STAT_MAP: dict[str, str] = {
 #: tabelul nu e completat inca - vezi `_stats_are_filled`.
 VITAL_LABELS = ("Total pase", "Posesia mingii")
 
+#: Coloanele pe care LPF le scrie doar daca nu le are nimeni. Flashscore e
+#: sursa principala pe ele: la Dinamo - FCSB, LPF publica 2-2 cornere la un
+#: meci cu 32 de suturi, unde Flashscore da 14. Pe restul statisticilor LPF
+#: ramane sursa oficiala.
+DEFER_TO_FLASHSCORE = ("corners", "yellow_cards", "red_cards")
+
 #: Cate zile dupa meci se mai reciteste pagina. LPF completeaza tabelul pe
 #: bucati, in ordine variabila, si mai si corecteaza; o singura citire, la
 #: cateva ore dupa fluier, prinde des o versiune incompleta.
@@ -580,7 +586,8 @@ class LpfProvider(DataProvider):
                 continue
             team_id = self.db.upsert_team(team_name)
             self.db.upsert_team_stats(match_id, team_id, is_home, columns,
-                                      source=self.name)
+                                      source=self.name,
+                                      fill_only=DEFER_TO_FLASHSCORE)
             written += 1
 
             key = "home" if is_home else "away"

@@ -134,7 +134,8 @@ def run_refresh(
 
     steps: list[str] = ["Rezultate și cote", "Scor live (Flashscore)",
                         "Calendar și rezultate live",
-                        "Statistici oficiale LPF", "Știri"]
+                        "Statistici oficiale LPF",
+                        "Cornere și cartonașe (Flashscore)", "Știri"]
     if not quick:
         steps.append("Cote pre-meci (Flashscore)")
     if not quick:
@@ -252,6 +253,19 @@ def run_refresh(
                 + (f"; {skipped} încă fără scor" if skipped else ""))
 
     record("Statistici oficiale LPF", lpf_stats)
+
+    # ------------------------------------------------------------------
+    def flashscore_stats() -> str:
+        provider = FlashscoreProvider(db=db, cfg=cfg)
+        if not provider.available:
+            raise Skip("oprit din .env (FLASHSCORE_ENABLED)")
+        result = provider.ingest_stats(season)
+        if not result.matches:
+            return "nimic de completat"
+        return (f"{result.matches} meciuri, cornere și cartonașe"
+                + (f"; {len(result.errors)} erori" if result.errors else ""))
+
+    record("Cornere și cartonașe (Flashscore)", flashscore_stats)
 
     # ------------------------------------------------------------------
     def news() -> str:
