@@ -1172,6 +1172,75 @@ trebuie refăcut. După reparație, Brier-ul pe piața de cornere a scăzut de l
 
 ---
 
+---
+
+## Datele nu se mai repară după, se primesc corecte
+
+Până acum, fiecare sursă era corectată *după* ce greșea: se descoperea un
+număr ciudat, se căuta cauza, se repara. Trei lucruri au schimbat asta.
+
+### 1. O valoare imposibilă nu mai intră
+
+Verificarea stă în `upsert_team_stats`, prin care trec **toți** providerii —
+nu în fiecare provider, unde s-ar uita la următorul. O cifră care nu poate fi
+adevărată se scrie ca „nu știu", nu ca zero:
+
+| regulă | de ce |
+|---|---|
+| `passes = 0`, `possession = 0` | nicio echipă nu termină un meci așa |
+| în afara intervalului (`yellow_cards > 12`, `possession > 100`) | eroare de format sau de unitate |
+| text care nu e număr | sursa a schimbat formatul |
+| `corners = 0` **rămâne permis** | rar, dar posibil |
+
+Marginile sunt largi dinadins: prind o eroare de format, nu un meci
+neobișnuit. Recordurile reale trec — 21 de cornere într-un meci, 9 galbene la
+o echipă — și există un test exact pentru asta.
+
+Diferența dintre `0` și `NULL` se propagă mai departe: modelul sare peste ce nu
+știe, decontarea anulează pontul în loc să-l piardă, iar când sursa completează
+mai târziu, valoarea adevărată intră peste `NULL` fără să se bată cu un zero
+inventat.
+
+### 2. Completările târzii se prind singure
+
+Paginile LPF se recitesc 7 zile după meci, statisticile Flashscore la fel. Nu
+mai există „citit o dată, greșit pe veci". Iar un verdict dat pe date care
+între timp s-au schimbat se reface cu `resettle_matches()`.
+
+### 3. Aplicația se verifică singură
+
+Pe „Date și surse" apare acum verificarea la fiecare deschidere, plus cât de
+completă e fiecare coloană. Tot ce s-a găsit stricat până acum s-a găsit
+fiindcă s-a uitat cineva.
+
+### Arhiva: de la o treime la aproape tot
+
+Feed-ul obișnuit acoperă doar sezonul curent, deci meciurile vechi n-aveau id
+Flashscore și nu li se puteau cere statisticile. `fetch_archive` paginează
+rezultatele unui sezon trecut, `link_archive` le leagă de baza noastră după zi
+și echipele normalizate — **1282 din 1282, 100%**.
+
+| sezon | cornere înainte | după |
+|---|---|---|
+| 2022 | 233 / 321 | **321 / 321** |
+| 2023 | 63 / 321 | **321 / 321** |
+| 2024 | 65 / 319 | **319 / 319** |
+| 2025 | **0** / 321 | **321 / 321** |
+| 2026 | 62 / 62 | 62 / 63 (meciul de aseară, se aduce la următoarea actualizare) |
+
+Rândurile de echipă cu cornere: **de la 848 la 2688**. Modelul de cornere și
+cartonașe vedea o treime din istorie; acum o vede aproape toată.
+
+Ce **nu** s-a completat: șuturile și posesia rămân la 840 de rânduri. Ele vin
+de la API-Football și LPF, iar din arhivă s-au adus doar cele două piețe pe
+care se pariază — restul ar fi schimbat tăcut proveniența unor date care n-au
+fost puse în discuție.
+
+### Ce rămâne negarantat
+
+O cifră **plauzibilă dar greșită** trece. Garda prinde imposibilul, nu
+incorectul: dacă Flashscore zice 9 cornere și au fost 10, nimic n-o prinde. Iar
+unde două surse se contrazic plauzibil, urmăm o regulă, nu o dovadă.
 ## Cine are ultimul cuvânt pe cornere și cartonașe
 
 LPF e sursa oficială a ligii și rămâne sursa pentru restul statisticilor. Dar
