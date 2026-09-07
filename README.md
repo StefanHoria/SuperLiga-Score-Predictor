@@ -48,7 +48,7 @@ Se deschide în browser pe `http://localhost:8501`.
 | **Performanța modelului** | Backtest cronologic, calibrare, comparație cu cotele pieței |
 | **Date și surse** | Butoane de actualizare, ce sursă merge, cât de complete sunt datele, unelte de curățare |
 | **Bilete** | Generare, verificare, acuratețe, învățare, surprize |
-| **Live** | Scorul meciurilor în desfășurare, cu șansele recalculate pe loc și starea ponturilor tale |
+| **Live** | Scorul meciurilor în desfășurare, cartonașele și cornerele de până acum, șansele recalculate pe loc, starea ponturilor tale și ponturi propuse din situația din teren |
 | **Știri** | Absențe, reveniri și transferuri citite din presă, cu propoziția-dovadă lângă fiecare |
 | **Transferuri** | Veniri și plecări pe club, cu sumele plătite și încasate, și profitul rezultat |
 
@@ -857,6 +857,7 @@ PredictieScor/
     │   ├── dixon_coles.py         modelul de goluri
     │   ├── markets.py             derivarea tuturor piețelor
     │   ├── inplay.py              probabilități în timpul meciului
+    │   ├── livetips.py            ponturi din situația din teren
     │   ├── secondary.py           cornere, cartonașe, șuturi
     │   ├── xg.py                  xG reconstruit din zonele de șut
     │   ├── simulation.py          piețe corelate, Monte Carlo
@@ -1098,6 +1099,67 @@ e în el se detașează (`team_id` devine NULL). Jucătorul **nu** se șterge:
 aparițiile lui din meciurile trecute rămân, și e corect să rămână.
 
 ---
+
+## Ponturi live, din ce s-a întâmplat până acum
+
+Ideea încape într-o propoziție: **ce s-a jucat e sigur, restul se estimează
+din ritmul de până acum amestecat cu ce se aștepta înainte de start.** Trei
+cornere în 45 de minute nu înseamnă nici șase la final (ritmul observat, luat
+orbește), nici nouă și jumătate (așteptarea, ca și cum nu s-ar fi jucat nimic).
+
+Amestecul e o actualizare Gamma-Poisson. Așteptarea cântărește cât un meci
+întreg de observații, deci la minutul 45 cele două trag la fel; spre final
+decide aproape numai ce s-a văzut — și trebuie să decidă, fiindcă atunci a mai
+rămas puțin de estimat.
+
+```
+ritm_pe_90 = (a · λ + k) / (a + m / 90)        a = 1 meci de „greutate"
+```
+
+Restul de meci se numără cu **Poisson, nu Negative Binomial**. Dispersia
+măsurată în `secondary.py` descrie împrăștierea unui meci întreg, în bună parte
+din diferențele *dintre* meciuri — arbitru, miză, teren. La minutul 48 acelea
+s-au întâmplat deja și nu se mai repetă pe rest; aplicată pe rămășiță, ar lărgi
+degeaba intervalul. E același raționament pentru care `inplay.py` nu aplică
+corecția Dixon-Coles pe restul de meci.
+
+### Ce se afișează
+
+Un pont pe piață, nu cinci linii vecine care spun același lucru, și numai
+între 65% și 97%: sub prag nu merită spus, peste el nu mai e un pont — „peste
+0.5 goluri" la 2-0 are probabilitatea 1 și nu e o știre.
+
+**Ordinea e după cât a mutat meciul probabilitatea**, nu după cât de mare e.
+Că favorita a rămas favorită nu spune nimic; că „sub 8.5 cornere" a urcat de la
+43% la 82% spune.
+
+| pontul | șansă | cotă corectă | înainte de meci | mișcare |
+|---|---|---|---|---|
+| cornere: sub 8.5 | 81.6% | 1.23 | 43.1% | **+38.5** |
+| total goluri 2.5: sub | 86.9% | 1.15 | 49.4% | +37.5 |
+| ambele marchează: nu | 80.1% | 1.25 | 49.4% | +30.6 |
+| șansă dublă: 1X | 80.7% | 1.24 | 77.2% | +3.5 |
+
+### Ce nu sunt
+
+**Nu sunt „valoare".** Pe 1004 meciuri s-a măsurat că acolo unde modelul se
+desparte de piață greșește mai des modelul. Aici nici măcar nu se compară cu o
+cotă live — nu avem așa ceva. Cota afișată e cea *corectă* după model: profit
+există doar dacă găsești una mai mare la casă.
+
+**Cartonașele se adună spre final**, iar modelul presupune ritm constant. Nu
+avem minutele lor în bază, deci profilul nu poate fi măsurat; până atunci,
+„peste" la cartonașe iese subestimat. Scrie și pe pagină.
+
+### Un bug găsit în timp ce se construia
+
+Flashscore scrie „Univ. Craiova" și „'U' Cluj"; modelul cunoaște
+„Universitatea Craiova" și „Universitatea Cluj". Fără traducere,
+`attack.get(nume, 1.0)` întorcea tăcut forța medie a ligii pentru amândouă —
+deci **toate** cifrele de pe pagina de Live erau calculate cu echipe medii:
+35.8% pentru gazdă în loc de 42.0%. Nimeni n-ar fi observat, fiindcă numărul
+ieșea plauzibil. Numele trec acum prin `canonical_team()`.
+
 
 ## Transferuri, cu bani cu tot
 

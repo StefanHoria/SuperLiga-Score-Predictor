@@ -16,7 +16,9 @@ from predictiescor.data.flashscore import FlashscoreProvider
 from predictiescor.modeling.inplay import (
     InPlayState, live_markets, ticket_status_live,
 )
+from predictiescor.modeling.livetips import live_tips
 from predictiescor.storage.db import Database
+from predictiescor.utils.teamnames import canonical_team
 
 def _estimate_minute(match) -> int:
     """Minutul aproximativ, cand feed-ul nu il publica.
@@ -189,8 +191,13 @@ for match in live:
             delta_color="off")
 
         minute = match.minute or _estimate_minute(match)
+        # Flashscore scrie „Univ. Craiova" si „'U' Cluj"; modelul cunoaste
+        # „Universitatea Craiova" si „Universitatea Cluj". Fara traducere,
+        # `attack.get(nume, 1.0)` dadea tacut forta medie a ligii pentru
+        # amandoua: 35.8% pentru gazda in loc de 42.0%, si nimeni n-ar fi
+        # observat, fiindca numarul iesea plauzibil.
         state = InPlayState(
-            match.home, match.away,
+            canonical_team(match.home), canonical_team(match.away),
             match.home_goals or 0, match.away_goals or 0, minute)
 
         try:
@@ -229,4 +236,55 @@ for match in live:
                 st.caption(
                     "„Iese acum” înseamnă că pontul ar fi câștigat dacă meciul "
                     "s-ar termina în clipa asta — nu că e deja decis."
+                )
+
+        # --------------------------------------------------------------
+        st.markdown("**Ponturi sugerate de situația din teren**")
+        tips = live_tips(pipeline, state, stats)
+        if not tips:
+            st.caption("Nimic de propus acum: ori e prea devreme, ori tot ce "
+                       "iese din calcul e deja ca și decis.")
+        else:
+            frame = pd.DataFrame([{
+                "pontul": tip.description,
+                "șansă": tip.probability,
+                "cota corectă": round(tip.fair_odds, 2),
+                "înainte de meci": tip.prematch,
+                "mișcare": tip.movement,
+                "de ce": tip.reason,
+            } for tip in tips])
+            st.dataframe(
+                frame, hide_index=True, width="stretch",
+                column_config={
+                    "șansă": st.column_config.NumberColumn(format="percent"),
+                    "înainte de meci": st.column_config.NumberColumn(
+                        format="percent"),
+                    "mișcare": st.column_config.NumberColumn(
+                        format="percent",
+                        help="Cât a mutat meciul probabilitatea față de "
+                             "dinainte de start. Acolo e informația adusă de "
+                             "minutele jucate."),
+                })
+            st.caption(
+                "**Ordinea e după cât a mutat meciul probabilitatea**, nu "
+                "după cât de mare e — că favorita a rămas favorită nu e o "
+                "știre. Cota afișată e cea *corectă* după model: ai profit "
+                "doar dacă găsești una mai mare la casă."
+            )
+            with st.expander("Cât de mult să te bazezi pe ele"):
+                st.markdown(
+                    "- **Nu sunt „valoare”.** Pe 1004 meciuri, acolo unde "
+                    "modelul s-a despărțit de piață, mai des a greșit "
+                    "modelul (vezi *Performanța modelului*). Aici nici măcar "
+                    "nu comparăm cu o cotă live — n-avem așa ceva.\n"
+                    "- **Restul meciului e estimat**, amestecând ritmul de "
+                    "până acum cu ce se aștepta înainte de start. La minutul "
+                    "45 cele două cântăresc la fel; spre final decide ce s-a "
+                    "văzut.\n"
+                    "- **Cartonașele se adună spre final**, iar modelul "
+                    "presupune un ritm constant. Nu avem minutele lor în "
+                    "bază, deci nu putem măsura profilul — până atunci, "
+                    "„peste” la cartonașe e subestimat.\n"
+                    "- **Nu intră nimic în bilete automat.** E o părere "
+                    "afișată, nu un pariu plasat."
                 )
