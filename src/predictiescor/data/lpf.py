@@ -74,6 +74,11 @@ STAT_MAP: dict[str, str] = {
 #: tabelul nu e completat inca - vezi `_stats_are_filled`.
 VITAL_LABELS = ("Total pase", "Posesia mingii")
 
+#: Cate zile dupa meci se mai reciteste pagina. LPF completeaza tabelul pe
+#: bucati, in ordine variabila, si mai si corecteaza; o singura citire, la
+#: cateva ore dupa fluier, prinde des o versiune incompleta.
+RECHECK_DAYS = 7
+
 #: iconita evenimentului -> tipul lui
 EVENT_ICONS: dict[str, str] = {
     "gol.png": "goal",
@@ -794,17 +799,30 @@ class LpfProvider(DataProvider):
         pagina inca necompletata (zero pase) trebuie recitit cand LPF o umple.
         Fara conditia asta, cele cinci meciuri stricate ar fi ramas stricate
         pentru totdeauna - pagina se citea o singura data in viata ei.
+
+        Si nu e de ajuns, fiindca pagina nu se umple dintr-o bucata, si nici
+        mereu in aceeasi ordine. La UTA Arad - Csikszereda statisticile erau
+        toate acolo (450 de pase, 17 suturi, 8 cornere), dar cartonasele
+        stateau pe zero si au aparut abia peste doua zile; pontul „peste 2.5
+        cartonase" se decontase deja contra unui zero. Orice garda pe un camp
+        anume ar rata alt camp.
+
+        Deci **paginile meciurilor recente se recitesc oricum**, cateva zile,
+        pana cand LPF termina de completat. Sunt vreo doua etape - ieftin, si
+        singurul mod de a prinde si completarile tarzii, si corecturile.
         """
         with self.db.connect() as conn:
             rows = conn.execute(
                 "SELECT e.ext_id FROM match_external_ids e"
+                " JOIN matches m ON m.match_id = e.match_id"
                 " WHERE e.source = ?"
+                "   AND m.utc_date < datetime('now', ?)"
                 "   AND EXISTS (SELECT 1 FROM match_team_stats s"
                 "               WHERE s.match_id = e.match_id"
                 "                 AND COALESCE(s.passes, 0) > 0)"
                 "   AND EXISTS (SELECT 1 FROM player_match_stats p"
                 "               WHERE p.match_id = e.match_id)",
-                (self.name,),
+                (self.name, f"-{RECHECK_DAYS} days"),
             ).fetchall()
         out: set[int] = set()
         for row in rows:

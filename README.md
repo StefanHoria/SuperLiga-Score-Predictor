@@ -1146,6 +1146,22 @@ pagina intră din nou în listă la următoarea rulare. `upsert_team_stats`
 folosea deja `COALESCE`, deci o valoare adevărată suprascrie zeroul, iar un
 `NULL` nu șterge ce se știe.
 
+### Și nu era de ajuns
+
+Pagina nu se umple dintr-o bucată, și nici mereu în aceeași ordine. La UTA Arad
+— Csikszereda statisticile erau toate acolo — 450 de pase, 17 șuturi, 8 cornere
+— dar **cartonașele** stăteau pe zero și au apărut abia peste două zile. Pontul
+„peste 2.5 cartonașe" se decontase deja contra unui zero.
+
+Orice gardă pusă pe un câmp anume ar rata alt câmp. Deci paginile meciurilor
+din ultimele **7 zile se recitesc oricum**, până când LPF termină de completat:
+vreo două etape la fiecare rulare, ieftin, și singurul mod de a prinde și
+completările târzii, și corecturile.
+
+Recitirea întregului sezon, o dată, a mai schimbat un singur meci — cele două
+cartonașe de mai sus — dar a adus și datele pe jucători care lipseau, iar
+biletul de marcatori din 5 septembrie a ieșit din „anulat" în **câștigat**.
+
 Pentru biletele deja judecate pe cifrele greșite există `resettle_matches()`:
 redeschide ponturile de pe meciurile date și le judecă din nou. Decontarea
 obișnuită nu se mai uită la un pont odată decis — și bine face, altfel ar

@@ -11,13 +11,14 @@ greșite: „sub 8.5 cornere" ieșise câștigat contra unui zero inventat, la u
 meci care avusese nouă.
 """
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import pytest
 
-from predictiescor.data.lpf import LpfProvider
+from predictiescor.data.lpf import RECHECK_DAYS, LpfProvider
 from predictiescor.storage.db import Database
 from predictiescor.tickets.settlement import resettle_matches
 
@@ -29,9 +30,11 @@ def db(tmp_path):
     return Database(tmp_path / "refill.db")
 
 
-def _match(db, *, goals=(1, 3)):
+def _match(db, *, goals=(1, 3), zile_in_urma=30):
+    """Un meci jucat acum `zile_in_urma` zile."""
+    cand = datetime.now(timezone.utc) - timedelta(days=zile_in_urma)
     return db.upsert_match(
-        season=2026, utc_date=f"{ZIUA}T18:00:00+00:00",
+        season=2026, utc_date=cand.isoformat(),
         home="FCSB", away="UTA Arad",
         home_goals=goals[0], away_goals=goals[1], status="finished")
 
@@ -61,6 +64,27 @@ def _known(db):
 def test_a_complete_page_is_left_alone(db):
     match_id = _match(db)
     _lpf_row(db, match_id, passes=400.0, corners=5.0)
+    assert 3640 in _known(db)
+
+
+def test_a_recent_match_is_read_again_whatever_it_holds(db):
+    """Pagina nu se umple dintr-o bucata, si nici mereu in aceeasi ordine.
+
+    La UTA Arad - Csikszereda statisticile erau toate acolo - 450 de pase, 17
+    suturi, 8 cornere - dar cartonasele stateau pe zero si au aparut abia peste
+    doua zile. Pontul „peste 2.5 cartonase" se decontase deja contra unui zero.
+    Orice garda pe un camp anume ar rata alt camp, deci meciurile recente se
+    recitesc oricum.
+    """
+    match_id = _match(db, zile_in_urma=2)
+    _lpf_row(db, match_id, passes=450.0, corners=9.0)
+    assert 3640 not in _known(db)
+
+
+def test_an_old_match_is_left_alone_once_complete(db):
+    """Fereastra e marginita: nu recitim tot sezonul la fiecare rulare."""
+    match_id = _match(db, zile_in_urma=RECHECK_DAYS + 3)
+    _lpf_row(db, match_id, passes=450.0, corners=9.0)
     assert 3640 in _known(db)
 
 
