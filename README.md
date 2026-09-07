@@ -846,7 +846,7 @@ PredictieScor/
     │   └── http.py                client HTTP cu cache și rate limiting
     ├── storage/                   schema SQLite și accesul la date
     ├── data/                      cei șapte provideri + agregatorul
-    │   ├── flashscore.py          scor live și ore de start
+    │   ├── flashscore.py          scor live, statistici, ore de start
     │   ├── flashscoreodds.py      cote pre-meci de la 5 case
     │   ├── news.py                fluxuri RSS din presa sportivă
     │   ├── newsfacts.py           text liber → fapte, cu nivel de încredere
@@ -1170,6 +1170,62 @@ trebuie refăcut. După reparație, Brier-ul pe piața de cornere a scăzut de l
 0.274 la **0.258**.
 
 
+---
+
+## Cine are ultimul cuvânt pe cornere și cartonașe
+
+LPF e sursa oficială a ligii și rămâne sursa pentru restul statisticilor. Dar
+pe **cele două piețe pe care se pariază** s-a dovedit nesigură, iar comparația
+cu Flashscore, pe toate cele 61 de meciuri ale sezonului, o arată:
+
+| | coincid | diferă |
+|---|---|---|
+| cornere | 54 / 61 | 7 |
+| cartonașe galbene | 53 / 59 | 6 |
+
+Cele mai multe diferențe sunt de unu-doi și țin de cum numără fiecare sursă.
+Una însă nu: la **Dinamo — FCSB**, LPF publică 2-2 cornere la un meci cu 32 de
+șuturi, unde Flashscore dă 14.
+
+Deci Flashscore are ultimul cuvânt pe `corners`, `yellow_cards` și
+`red_cards`; LPF completează doar unde nu are nimeni nimic.
+
+### Precedența nu depinde de ordinea pașilor
+
+Tentația e să lași „cine scrie ultimul câștigă" și să pui pasul Flashscore
+după cel LPF. Ar merge — până la prima reordonare a pașilor, când s-ar strica
+în tăcere.
+
+În loc de asta, `upsert_team_stats` primește `fill_only`: coloanele pe care
+providerul le pune **doar dacă nu le are nimeni**. LPF le trece pe cele trei
+acolo, Flashscore le scrie normal. Rezultatul e același în ambele ordini — și
+există un test exact pentru asta.
+
+```sql
+-- normal:     valoarea nouă câștigă
+corners = COALESCE(excluded.corners, match_team_stats.corners)
+-- fill_only:  valoarea veche rămâne
+corners = COALESCE(match_team_stats.corners, excluded.corners)
+```
+
+### Ce s-a schimbat la completare
+
+Zece meciuri corectate, cel mai mult Dinamo — FCSB (4 → 14 cornere). Două
+ponturi și-au schimbat verdictul — „sub 10.5 cornere" a trecut din pierdut în
+câștigat, la fel „peste 2.5 cartonașe" — iar un bilet a ieșit pe plus.
+
+Efectul pe acuratețe, măsurat *fără* nicio schimbare de model, doar pentru că
+adevărul e mai exact:
+
+| piață | Brier înainte | după | abatere de calibrare |
+|---|---|---|---|
+| cornere | 0.258 | **0.245** | −0.070 → **−0.041** |
+| cartonașe | 0.174 | **0.165** | −0.025 → **−0.013** |
+
+O cerere per meci, deci lista se ține scurtă: la o rulare obișnuită sunt cele
+opt meciuri ale etapei, plus orice meci mai vechi căruia îi lipsesc cornerele.
+
+---
 ## Ponturi live, din ce s-a întâmplat până acum
 
 Ideea încape într-o propoziție: **ce s-a jucat e sigur, restul se estimează
