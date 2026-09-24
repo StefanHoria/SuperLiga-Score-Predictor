@@ -1174,6 +1174,63 @@ trebuie refăcut. După reparație, Brier-ul pe piața de cornere a scăzut de l
 
 ---
 
+## Verificarea de după o pauză (25 septembrie 2026)
+
+Aplicația n-a fost pornită 17 zile. Rezultatele erau totuși în bază — le adusese
+verificatorul de bilete, care rulează la 15 minute — dar actualizarea completă
+nu mai reușise din 9 septembrie. Comparată apoi toată baza cu Flashscore:
+**0 scoruri diferite** pe cele 79 de meciuri jucate, niciun meci jucat lipsă.
+Au ieșit însă patru probleme, toate reparate.
+
+### 1. Sarcina zilnică sărea peste zilele cu PC-ul oprit
+
+`schtasks /create` lasă implicit două condiții: o rulare ratată **nu se
+recuperează** (PC oprit la 04:30 = zi pierdută) și sarcina **nu pornește pe
+baterie** (pe 24 septembrie a fost refuzată exact așa, `0x800710E0`).
+Instalatorul le schimbă acum prin PowerShell (`utils/tasks.py`): pornește la
+prima ocazie după o rulare ratată, merge pe baterie și se oprește singură după
+două ore dacă se blochează.
+
+### 2. Meciurile reprogramate își păstrau data veche
+
+Corecția orelor accepta cel mult 36 de ore, ca să nu confunde turul cu returul.
+Opt meciuri mutate cu două zile au rămas cu data inițială — FCSB — Petrolul pe
+12 în loc de 14, iar Rapid — Argeș și Dinamo — Farul își schimbaseră zilele
+între ele. Pentru meciurile viitoare contează: o dată greșită mută meciul în
+ziua altor bilete. Unde perechea gazdă–oaspete e unică și în feed, și în bază —
+tot sezonul regulat — nu există ambiguitate, deci se acceptă mutări de până la
+60 de zile.
+
+### 3. „Niciun rând de cartonașe" înseamnă zero, nu „nu știu"
+
+Flashscore listează rândul de cartonașe **doar dacă s-a dat măcar unul** de
+culoarea aia. Verificat: în toate cele 60 de meciuri din 2026 fără rând de
+roșii, foile de joc arată zero roșii. La galbene, meciurile fără rând sunt
+**1.18%**, cât dă Poisson pentru zero galbene la media ligii (**1.21%**).
+
+Citit ca „nu știu", 82% din rânduri rămâneau fără roșii, iar modelul se
+antrena doar pe meciurile cu eliminări: **0.287 roșii pe echipă pe meci, de 2.7
+ori prea mult**. Acum 0.105 — adică ~0.21 pe meci, cât are liga. Regula se
+aplică doar când feed-ul are statistici deloc; un răspuns gol rămâne gol.
+
+### 4. Aplicația nu observa niciodată actualizările din terminal
+
+`data_version()` era corectă și testată, dar ajungea la cache printr-un
+parametru numit `_version`. **Streamlit scoate din cheia de cache orice
+parametru care începe cu underscore** — așa i se dau obiecte care nu se pot
+hash-ui. Deci modelele și sumarele se calculau o dată pe proces și rămâneau
+așa: pagina arăta 1355 de meciuri cu statistici când baza avea 1361, cu modele
+antrenate înaintea ultimei actualizări. Testul vechi verifica funcția de
+versiune, nu și că cache-ul o folosește; cel nou verifică exact asta.
+
+### Și Python
+
+Între timp s-a instalat Python 3.14, care a devenit `python` implicit, fără
+dependențele proiectului. Aplicația se pornește acum explicit cu `py -3.11`;
+sarcinile programate foloseau deja calea completă spre 3.11.
+
+---
+
 ## Datele nu se mai repară după, se primesc corecte
 
 Până acum, fiecare sursă era corectată *după* ce greșea: se descoperea un
