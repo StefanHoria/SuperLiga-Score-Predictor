@@ -295,3 +295,45 @@ def test_red_cards_are_not_added_to_the_yellow_count():
 def test_red_cards_also_only_from_the_whole_match_section():
     """„Repriza 1" are zero rosii; citita, ar sterge cartonasul."""
     assert parse_match_stats(STATS_FEED)["red_cards"] != (0.0, 0.0)
+
+
+# ----------------------------------------------------------------------
+# Randul de cartonase lipseste cand nu s-a dat niciunul
+# ----------------------------------------------------------------------
+FARA_ROSII = (
+    "SE÷Meci¬"
+    "~SF÷Top statistici¬"
+    "~SD÷16¬SG÷Cornere¬SH÷5¬SI÷3¬"
+    "~SD÷23¬SG÷Cartonașe galbene¬SH÷2¬SI÷1¬"
+)
+
+
+def test_a_missing_red_card_row_means_zero_reds():
+    """Verificat pe 60 de meciuri din 2026: fara rand, foile de joc arata 0.
+
+    Citit ca „nu stiu", 82% din randuri ramaneau fara rosii, iar modelul se
+    antrena doar pe meciurile cu eliminari.
+    """
+    assert parse_match_stats(FARA_ROSII)["red_cards"] == (0.0, 0.0)
+
+
+def test_a_missing_yellow_card_row_means_zero_yellows():
+    """1.18% din meciuri n-au rand de galbene - cat da Poisson pentru zero."""
+    fara_galbene = FARA_ROSII.replace(
+        "~SD÷23¬SG÷Cartonașe galbene¬SH÷2¬SI÷1¬", "")
+    assert parse_match_stats(fara_galbene)["yellow_cards"] == (0.0, 0.0)
+
+
+def test_a_present_card_row_is_read_as_published():
+    assert parse_match_stats(FARA_ROSII)["yellow_cards"] == (2.0, 1.0)
+
+
+def test_an_empty_response_does_not_turn_into_zero_cards():
+    """Un raspuns fara nicio statistica e „nu stiu", nu „zero cartonase"."""
+    assert parse_match_stats("") == {}
+    assert parse_match_stats("SE÷Meci¬~SF÷Top statistici¬") == {}
+
+
+def test_other_missing_statistics_stay_missing():
+    """Regula e verificata doar pentru cartonase; restul nu se inventeaza."""
+    assert "offsides" not in parse_match_stats(FARA_ROSII)

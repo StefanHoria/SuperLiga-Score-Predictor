@@ -28,29 +28,36 @@ def setup_page(title: str, icon: str = PAGE_ICON) -> None:
                        layout="wide", initial_sidebar_state="expanded")
 
 
+# Parametrul `version` NU are voie sa inceapa cu underscore. Streamlit scoate din
+# cheia de cache orice parametru numit `_ceva` - asa i se dau obiecte care nu se
+# pot hash-ui. Cu `_version`, fiecare functie de aici era calculata o data pe
+# proces si servita apoi la nesfarsit: aplicatia n-a observat niciodata singura
+# o actualizare facuta din terminal, desi `data_version()` se schimba corect.
+# Pe 25 septembrie 2026 arata 1355 de meciuri cu statistici cand baza avea 1361,
+# si modele antrenate inaintea ultimei actualizari.
 @st.cache_resource(show_spinner="Antrenez modelele...")
-def load_pipeline(_version: int = 0) -> PredictionPipeline:
-    """Modelele se antreneaza o singura data per sesiune (cateva secunde)."""
+def load_pipeline(version: int = 0) -> PredictionPipeline:
+    """Modelele se antreneaza o data per versiune a datelor (cateva secunde)."""
     return PredictionPipeline().train()
 
 
 @st.cache_data(show_spinner=False)
-def load_matches(_version: int = 0, finished_only: bool = True) -> pd.DataFrame:
+def load_matches(version: int = 0, finished_only: bool = True) -> pd.DataFrame:
     return Database().matches_df(finished_only=finished_only)
 
 
 @st.cache_data(show_spinner=False)
-def load_team_stats(_version: int = 0) -> pd.DataFrame:
+def load_team_stats(version: int = 0) -> pd.DataFrame:
     return Database().team_stats_df()
 
 
 @st.cache_data(show_spinner=False)
-def load_player_season_stats(_version: int = 0) -> pd.DataFrame:
+def load_player_season_stats(version: int = 0) -> pd.DataFrame:
     return Database().player_season_stats_df()
 
 
 @st.cache_data(show_spinner=False)
-def load_summary(_version: int = 0) -> dict:
+def load_summary(version: int = 0) -> dict:
     return Database().summary()
 
 

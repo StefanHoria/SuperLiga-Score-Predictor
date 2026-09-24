@@ -168,3 +168,41 @@ def test_a_filtered_table_is_not_left_with_blanks():
 def test_a_plain_list_still_works():
     out = local_series(["2026-09-06T12:00:00+00:00"], "%H:%M")
     assert list(out) == ["15:00"]
+
+
+
+# ----------------------------------------------------------------------
+# Cache-ul chiar foloseste versiunea
+#
+# `data_version()` era corecta si testata, dar parametrul prin care ajungea la
+# cache se numea `_version`. Streamlit scoate din cheia de cache orice parametru
+# care incepe cu underscore, deci totul se calcula o data pe proces si ramanea
+# asa. Testul de mai sus trecea; aplicatia tot arata cifre vechi.
+# ----------------------------------------------------------------------
+def test_the_cached_summary_follows_the_version(tmp_path, monkeypatch):
+    import common
+    from predictiescor.storage.db import Database
+
+    db = Database(tmp_path / "cache.db")
+    monkeypatch.setattr(common, "Database", lambda: db)
+    common.load_summary.clear()
+
+    inainte = common.load_summary(1)["meciuri"]
+    db.upsert_match(season=2026, utc_date="2026-09-20T17:30:00+00:00",
+                    home="FCSB", away="UTA Arad", status="scheduled")
+
+    assert common.load_summary(1)["meciuri"] == inainte, "aceeasi versiune: din cache"
+    assert common.load_summary(2)["meciuri"] == inainte + 1, "versiune noua: recitit"
+
+
+def test_no_cached_loader_hides_its_version():
+    """Niciun parametru de versiune nu are voie sa inceapa cu underscore."""
+    import inspect
+    import common
+
+    for name in ("load_pipeline", "load_matches", "load_team_stats",
+                 "load_player_season_stats", "load_summary"):
+        fn = getattr(common, name)
+        fn = getattr(fn, "__wrapped__", fn)
+        params = list(inspect.signature(fn).parameters)
+        assert params and params[0] == "version", (name, params)

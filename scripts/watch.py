@@ -128,7 +128,11 @@ def install_task() -> int:
         capture_output=True, text=True,
     )
     if result.returncode == 0:
+        from predictiescor.utils.tasks import relax_conditions
         print(f"Sarcina „{TASK_NAME}” a fost creată: rulează din 15 în 15 minute.")
+        ok, detaliu = relax_conditions(TASK_NAME)
+        print(("  " if ok else "  Atenție: nu am putut schimba condițiile — ")
+              + detaliu)
         print("Rulează în fundal, fără fereastră de consolă.")
         print(f"Jurnalul: {ROOT / 'data' / 'watch.log'}")
         return 0

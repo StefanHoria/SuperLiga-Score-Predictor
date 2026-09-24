@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "predictiescor",
-      "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "streamlit", "run", "src/predictiescor/app/main.py"],
+      "runtimeExecutable": "py",
+      "runtimeArgs": ["-3.11", "-m", "streamlit", "run", "src/predictiescor/app/main.py"],
       "port": 8501
     }
   ]

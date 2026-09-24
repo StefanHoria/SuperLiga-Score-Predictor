@@ -24,6 +24,7 @@ dar are deja scor. Asa, un cod necunoscut nu strica nimic.
 from __future__ import annotations
 
 import logging
+from collections import Counter
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -57,12 +58,20 @@ _FEED_KEY_RE = re.compile(r"ZH÷(\w+_\w+)")
 #: site-ul la „Statistici meci".
 MATCH_STATS_URL = "https://9.flashscore.ninja/9/x/feed/df_st_1_{match}"
 
+#: Statisticile pe care feed-ul le omite cand sunt zero, in loc sa scrie 0.
+#: Vezi `parse_match_stats`.
+CARD_STATS = ("yellow_cards", "red_cards")
+
 #: Coloanele pe care Flashscore le scrie in baza, cu ultimul cuvant. Restul
 #: statisticilor raman ale LPF, sursa oficiala a ligii; aici e vorba doar de
 #: cele doua piete pe care se pariaza, unde LPF s-a dovedit nesigura: la
 #: Dinamo - FCSB publica 2-2 cornere la un meci cu 32 de suturi, iar
 #: Flashscore da 14.
 INGESTED_STATS = ("corners", "yellow_cards", "red_cards")
+
+#: Cat de departe se poate muta un meci cand perechea e fara ambiguitate. Peste
+#: atat nu e o reprogramare, e aproape sigur o potrivire gresita.
+RESCHEDULE_LIMIT_SECONDS = 60 * 24 * 3600
 
 #: Cate zile dupa meci se mai cer statisticile. Dupa atata, nu se mai schimba.
 STATS_RECHECK_DAYS = 7
@@ -305,6 +314,19 @@ def parse_match_stats(raw: str) -> dict[str, tuple[float, float]]:
         if home is None or away is None:
             continue
         out[LIVE_STAT_IDS[stat_id]] = (home, away)
+
+    # Randul de cartonase apare DOAR daca s-a dat macar unul de culoarea aia.
+    # Lipsa lui inseamna zero, nu „nu stiu" - verificat: in toate cele 60 de
+    # meciuri din 2026 fara rand de rosii, foile de joc arata zero rosii. La
+    # galbene, meciurile fara rand sunt 1.18%, cat da Poisson pentru zero
+    # galbene la media ligii (1.21%). Citit ca „nu stiu", 82% din randuri
+    # ramaneau fara rosii, iar modelul se antrena doar pe meciurile cu
+    # eliminari - media iesea de trei ori prea mare.
+    #
+    # Numai daca feed-ul are statistici deloc: un raspuns gol ramane gol.
+    if out:
+        for name in CARD_STATS:
+            out.setdefault(name, (0.0, 0.0))
     return out
 
 
@@ -759,6 +781,15 @@ class FlashscoreProvider(DataProvider):
         decat se joaca. Parserele au fost corectate, dar randurile scrise
         inainte raman gresite; functia asta le repara.
 
+        Si prinde **reprogramarile**. Pragul de 36 de ore exista ca sa nu fie
+        confundat turul cu returul - aceeasi pereche se poate intalni de doua
+        ori - dar o mutare cu doua zile il depasea si ramanea neobservata: in
+        septembrie 2026, opt meciuri (FCSB - Petrolul, mutat de pe 12 pe 14;
+        Rapid - Arges si Dinamo - Farul, care si-au schimbat intre ele zilele)
+        aveau in baza data planificata initial. Unde perechea gazda-oaspete e
+        **unica** si in feed, si in baza - adica in tot sezonul regulat - nu
+        exista nicio ambiguitate, deci se accepta si mutari mari.
+
         Intoarce numarul de meciuri corectate.
         """
         from ..utils.teamnames import canonical_team
@@ -779,9 +810,12 @@ class FlashscoreProvider(DataProvider):
                 " WHERE m.season = ?", (self.cfg.current_season,),
             ).fetchall()
 
+        in_db = Counter((row["home"], row["away"]) for row in rows)
+
         corrections: list[tuple[str, int]] = []
         for row in rows:
-            candidates = feed.get((row["home"], row["away"]))
+            key = (row["home"], row["away"])
+            candidates = feed.get(key)
             if not candidates:
                 continue
             stored = datetime.fromisoformat(str(row["utc_date"]))
@@ -791,7 +825,9 @@ class FlashscoreProvider(DataProvider):
             # echipe se poate juca de doua ori intr-un sezon)
             best = min(candidates, key=lambda k: abs((k - stored).total_seconds()))
             drift = abs((best - stored).total_seconds())
-            if drift > tolerance_minutes * 60 and drift < 36 * 3600:
+            unique = len(candidates) == 1 and in_db[key] == 1
+            limit = RESCHEDULE_LIMIT_SECONDS if unique else 36 * 3600
+            if tolerance_minutes * 60 < drift < limit:
                 corrections.append((best.isoformat(), int(row["match_id"])))
 
         if corrections:

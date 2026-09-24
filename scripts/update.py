@@ -105,7 +105,11 @@ def install_task(at: str) -> int:
         capture_output=True, text=True,
     )
     if result.returncode == 0:
+        from predictiescor.utils.tasks import relax_conditions
         print(f"Sarcina „{TASK_NAME}” creată: rulează zilnic la {at}.")
+        ok, detaliu = relax_conditions(TASK_NAME)
+        print(("  " if ok else "  Atenție: nu am putut schimba condițiile — ")
+              + detaliu)
         print("Aduce rezultatele noi și continuă completarea statisticilor "
               "istorice, în limita a ~90 de cereri API pe zi.")
         print("Rulează în fundal, fără fereastră de consolă.")
