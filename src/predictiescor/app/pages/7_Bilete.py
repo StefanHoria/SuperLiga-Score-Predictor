@@ -248,10 +248,13 @@ with tab_history:
         "pe unde e."
     )
 
-    # ---- verificare automată ----
+    # ---- ce e de verificat ----
+    # Nu mai exista verificare in fundal: sarcina Windows a fost stearsa pe 29
+    # septembrie 2026, la cerere. Blocul arata doar ce asteapta si cand are rost
+    # sa apesi butonul de mai sus.
     watch = watcher_status(db)
     with st.container(border=True):
-        st.markdown("#### Verificare automată")
+        st.markdown("#### Ce e de verificat")
         cols = st.columns([1, 1, 2])
         cols[0].metric("Bilete deschise", watch["bilete_deschise"])
         cols[1].metric("De verificat acum", len(watch["de_verificat"]))
@@ -281,15 +284,11 @@ with tab_history:
                     "open_legs": "ponturi nedecontate"}),
                 hide_index=True, width="stretch")
 
-        st.markdown(
-            "Ca biletele să fie verificate **singure, după fiecare meci**, "
-            "chiar și cu aplicația închisă, înregistrează o sarcină Windows:")
-        st.code("python scripts/watch.py --install", language="bash")
         st.caption(
-            "Rulează din 15 în 15 minute, dar nu face nicio cerere de rețea "
-            "decât dacă un meci chiar s-a încheiat între timp. "
-            "O oprești cu `python scripts/watch.py --uninstall`, "
-            "iar starea o vezi cu `python scripts/watch.py --status`."
+            "Nimic nu rulează în fundal: biletele se verifică atunci când apeși "
+            "**Verifică biletele acum** sau **Actualizează datele**. "
+            "„Următoarea verificare utilă” e momentul de după care are rost "
+            "să apeși — înainte de el, meciul încă nu s-a terminat."
         )
 
     summary = overall_summary(db)

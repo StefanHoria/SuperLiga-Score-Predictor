@@ -297,20 +297,17 @@ prospețime și reia tot.
 python scripts/update.py
 ```
 
-### Programare automată, dintr-o comandă
+### Nimic nu rulează în fundal
 
-```bash
-python scripts/update.py --install
-```
+Nu există sarcini programate și nici pornire automată. Au existat două — o
+actualizare completă zilnică și o verificare a biletelor la 15 minute — șterse
+pe 29 septembrie 2026, la cerere, împreună cu opțiunile `--install` /
+`--uninstall` care le creau. Datele se aduc când apeși **⬇️ Actualizează
+datele** sau rulezi una dintre comenzile de mai jos.
 
-Creează o sarcină Windows care rulează complet, zilnic la 04:30: aduce
-rezultatele noi **și continuă completarea statisticilor istorice**, în limita
-cotei API. Backfill-ul are de recuperat ~900 de meciuri (sezoanele 2022–2024),
-adică vreo zece zile de rulare — după care modelele de cornere, cartonașe și
-șuturi se antrenează pe de nouă ori mai multe date decât acum.
-
-Împreună cu `python scripts/watch.py --install` (verificarea biletelor la
-fiecare meci), aplicația se întreține singură.
+Consecința, spusă pe față: după o pauză, prima actualizare are mai mult de
+adus. Pașii se reiau de unde au rămas, deci nu se pierde nimic — doar durează
+mai mult o dată.
 
 | Comandă | Durată | Când |
 |---|---|---|
@@ -318,22 +315,6 @@ fiecare meci), aplicația se întreține singură.
 | `python scripts/update.py` | ~2–10 min | o dată pe zi |
 | `python scripts/update.py --with-tickets` | idem | dimineața, înainte de meciuri |
 | `python scripts/update.py --budget 0 --no-players` | ~5 s | ca `--quick`, dar rulează și curățarea și decontarea biletelor |
-
-### Automatizare pe Windows
-
-Rulează la fiecare 3 ore, în fundal:
-
-```bash
-schtasks /create /tn "PredictieScor" /sc hourly /mo 3 /tr "python C:\Users\stefa\Desktop\Proiecte\PredictieScor\scripts\update.py --quick"
-```
-
-Și o rulare completă zilnic la 09:00:
-
-```bash
-schtasks /create /tn "PredictieScor complet" /sc daily /st 09:00 /tr "python C:\Users\stefa\Desktop\Proiecte\PredictieScor\scripts\update.py --with-tickets"
-```
-
-Ștergi o sarcină cu `schtasks /delete /tn "PredictieScor" /f`.
 
 **Cât de „live" e:** rezultatele apar la câteva minute–ore după meci (atât
 Transfermarkt cât și football-data.co.uk actualizează după fluierul final).
@@ -377,10 +358,13 @@ Două reguli țin biletele oneste:
    cota reală va fi mai mică. Un bilet merită doar dacă cota oferită de casă
    e mai mare decât cea calculată aici.
 
-### Verificare automată, după fiecare meci
+### Verificarea după meci
+
+Se face când apeși **Verifică biletele acum** pe pagina Bilete, la
+**⬇️ Actualizează datele**, sau din terminal:
 
 ```bash
-python scripts/watch.py --install
+python scripts/watch.py --once
 ```
 
 La fiecare ciclu citește și **fluxurile de știri, cel mult o dată pe oră** —
@@ -389,10 +373,9 @@ meciului de seară, nu intra în bază decât dacă apăsai butonul: ciclul ajun
 la fluxuri doar când lipsea un rezultat, și nici atunci mereu, fiindcă
 Flashscore îl aduce de obicei pe calea rapidă.
 
-Înregistrează o sarcină Windows care rulează din 15 în 15 minute, **fără
-fereastră de consolă** (`pythonw.exe`; jurnalul ajunge în `data/watch.log`). Nu
-face nicio cerere de rețea decât dacă **chiar s-a încheiat un meci** între timp:
-știe programul, deci știe și când are rost să verifice.
+Nu face nicio cerere de rețea decât dacă **chiar s-a încheiat un meci** între
+timp: știe programul, deci știe și când are rost să verifice. Pagina Bilete
+arată „următoarea verificare utilă" — momentul de după care are rost să apeși.
 
 Fereastra e de **1 oră și 50 de minute** de la start — 45+15+45 de minute plus
 prelungirile înseamnă că un meci nu se poate încheia mai devreme. Era de 2h15 pe
@@ -409,8 +392,7 @@ drumul lung, nu se oprește.
 |---|---|
 | `python scripts/watch.py --status` | ce așteaptă și când e următoarea verificare utilă |
 | `python scripts/watch.py --once` | o singură verificare, acum |
-| `python scripts/watch.py` | rulează continuu, în terminal |
-| `python scripts/watch.py --uninstall` | oprește sarcina automată |
+| `python scripts/watch.py` | rulează continuu, în terminal, până la Ctrl+C |
 
 Un meci intră în lista „de verificat" doar dacă a început cu peste 1h50 în
 urmă **și** fie nu are încă rezultat, fie mai are ponturi nedecontate. Un bilet
@@ -1187,9 +1169,10 @@ Au ieșit însă patru probleme, toate reparate.
 `schtasks /create` lasă implicit două condiții: o rulare ratată **nu se
 recuperează** (PC oprit la 04:30 = zi pierdută) și sarcina **nu pornește pe
 baterie** (pe 24 septembrie a fost refuzată exact așa, `0x800710E0`).
-Instalatorul le schimbă acum prin PowerShell (`utils/tasks.py`): pornește la
-prima ocazie după o rulare ratată, merge pe baterie și se oprește singură după
-două ore dacă se blochează.
+Instalatorul a fost reparat atunci să le schimbe prin PowerShell — dar pe 29
+septembrie sarcinile au fost **șterse cu totul**, la cerere, împreună cu
+instalatorul. Nimic din proiect nu mai rulează în fundal; vezi „Nimic nu
+rulează în fundal", mai sus.
 
 ### 2. Meciurile reprogramate își păstrau data veche
 
